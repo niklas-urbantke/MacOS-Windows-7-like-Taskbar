@@ -1,0 +1,6 @@
+# Build-Artefakte
+.build/
+Win7Taskbar.app/
+
+# macOS
+.DS_Store
