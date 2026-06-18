@@ -8,12 +8,12 @@ final class GlassBackgroundView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let h = bounds.height
 
-        // Body: light glossy top → translucent dark bottom.
+        // Body: light glossy top → translucent dark bottom (kept fairly see-through).
         let body = NSGradient(colors: [
-            NSColor(calibratedWhite: 0.55, alpha: 0.42),
-            NSColor(calibratedWhite: 0.22, alpha: 0.40),
-            NSColor(calibratedWhite: 0.05, alpha: 0.55),
-            NSColor(calibratedWhite: 0.02, alpha: 0.72),
+            NSColor(calibratedWhite: 0.55, alpha: 0.07),
+            NSColor(calibratedWhite: 0.22, alpha: 0.06),
+            NSColor(calibratedWhite: 0.05, alpha: 0.10),
+            NSColor(calibratedWhite: 0.02, alpha: 0.16),
         ], atLocations: [0.0, 0.42, 0.5, 1.0], colorSpace: .deviceRGB)
         body?.draw(in: bounds, angle: -90)
 

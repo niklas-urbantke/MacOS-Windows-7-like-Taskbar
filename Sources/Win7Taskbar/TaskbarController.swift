@@ -74,6 +74,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         blur.blendingMode = .behindWindow
         blur.state = .active
         blur.appearance = NSAppearance(named: .darkAqua)
+        blur.alphaValue = 0.55   // weniger Blur: Frost-Schicht halbdurchlässig
         container.addSubview(blur)
 
         glass.frame = container.bounds
@@ -159,7 +160,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         buttons.forEach { $0.removeFromSuperview() }
         buttons.removeAll()
 
-        let startX = Theme.orbWidth + 4
+        let startX = Theme.orbWidth + 14   // 10px mehr Abstand zwischen Orb und erstem Icon
         let endX = trayLeftX - 6
         let available = max(0, endX - startX)
         guard !items.isEmpty, available > 0 else { return }
