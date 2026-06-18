@@ -54,9 +54,9 @@ final class StartOrbButton: NSControl {
 
     private func tick() {
         let glowTarget: CGFloat = (hovering || pressed) ? 1 : 0
-        glow += (glowTarget - glow) * 0.18
+        glow += (glowTarget - glow) * 0.12
         let pressTarget: CGFloat = pressed ? 1 : 0
-        press += (pressTarget - press) * 0.30
+        press += (pressTarget - press) * 0.16
         if hovering { phase += 0.08 }
 
         needsDisplay = true
@@ -88,9 +88,11 @@ final class StartOrbButton: NSControl {
     /// orb.png is one image stacked vertically in three states:
     /// top = normal, middle = hover, bottom = pressed. We crossfade between them.
     private func drawImageOrb(_ img: NSImage, in rect: NSRect) {
-        drawThird(img, 0, in: rect, alpha: 1)                       // normal (base)
-        if !pressed && glow > 0.01 { drawThird(img, 1, in: rect, alpha: glow) }   // hover fades in
-        if press > 0.01 { drawThird(img, 2, in: rect, alpha: press) }             // pressed fades in
+        // Three layers stacked normal → hover → pressed; each cross-fades over the one below,
+        // so the orb glides smoothly through the states in both directions.
+        drawThird(img, 0, in: rect, alpha: 1)                  // normal (base)
+        if glow > 0.001 { drawThird(img, 1, in: rect, alpha: glow) }    // hover fades in over normal
+        if press > 0.001 { drawThird(img, 2, in: rect, alpha: press) }  // pressed fades in over hover
     }
 
     private func drawThird(_ img: NSImage, _ index: Int, in rect: NSRect, alpha: CGFloat) {

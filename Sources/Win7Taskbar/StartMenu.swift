@@ -1,4 +1,5 @@
 import AppKit
+import Collaboration
 
 /// Windows-7-style two-column Start menu: white program list on the left,
 /// blue "places & power" panel on the right, with a search box and avatar.
@@ -11,14 +12,16 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private var allApps: [AppEntry] = []
     private var showingAll = false
     private var alleButton: LeftRowButton?
+    private var fileSearchToken = 0
     weak var taskbarController: TaskbarController?
 
     private let W = Theme.startWidth
     private let H = Theme.startHeight
     private let leftW = Theme.startLeftWidth
+    private let overhang: CGFloat = 50   // wie weit der Avatar oben rausragt
 
     override init() {
-        window = KeyableWindow(contentRect: NSRect(x: 0, y: 0, width: Theme.startWidth, height: Theme.startHeight),
+        window = KeyableWindow(contentRect: NSRect(x: 0, y: 0, width: Theme.startWidth, height: Theme.startHeight + 50),
                                styleMask: [.borderless], backing: .buffered, defer: false)
         super.init()
 
@@ -38,23 +41,49 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     // MARK: - Layout
 
     private func buildContent() {
-        root.frame = NSRect(x: 0, y: 0, width: W, height: H)
+        // Outer holder is taller than the menu; the menu sits at the bottom, leaving a
+        // transparent strip on top into which the avatar pokes out.
+        let outer = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H + overhang))
+
+        root.frame = NSRect(x: 0, y: 0, width: W, height: H)   // bottom-aligned in outer
         root.wantsLayer = true
         root.layer?.cornerRadius = 9
         root.layer?.masksToBounds = true
         root.layer?.borderWidth = 1
-        root.layer?.borderColor = NSColor(calibratedRed: 0.30, green: 0.45, blue: 0.68, alpha: 0.9).cgColor
+        root.layer?.borderColor = NSColor(calibratedWhite: 1, alpha: 0.30).cgColor
+
+        // Frosted glass background (like the taskbar): blur + semi-transparent column tint.
+        let blur = NSVisualEffectView(frame: root.bounds)
+        blur.autoresizingMask = [.width, .height]
+        blur.material = .underWindowBackground
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.appearance = NSAppearance(named: .darkAqua)
+        blur.alphaValue = 0.45   // weniger Blur
+        root.addSubview(blur)
+
+        let tint = ColumnTintView(frame: root.bounds)
+        tint.autoresizingMask = [.width, .height]
+        root.addSubview(tint)
 
         buildLeftColumn()
         buildRightColumn()
 
-        window.contentView = root
+        outer.addSubview(root)
+
+        // Avatar straddling the top edge of the menu — half above (in the transparent strip).
+        let avatarSize: CGFloat = 99
+        let avatar = AvatarView(frame: NSRect(x: leftW + (W - leftW - avatarSize) / 2,
+                                              y: H - avatarSize / 2, width: avatarSize, height: avatarSize))
+        outer.addSubview(avatar)
+
+        window.contentView = outer
     }
 
     private func buildLeftColumn() {
         // Scrollable program list.
         let bottomBlock: CGFloat = 88
-        scrollView.frame = NSRect(x: 6, y: 8, width: leftW - 12, height: H - bottomBlock - 8)
+        scrollView.frame = NSRect(x: 12, y: 12, width: leftW - 24, height: H - bottomBlock - 18)
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         scrollView.autohidesScrollers = true
@@ -81,12 +110,12 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         let alle = LeftRowButton(title: "Alle Programme", bold: false, arrow: true) { [weak self] in
             self?.toggleAllPrograms()
         }
-        alle.frame = NSRect(x: 6, y: H - bottomBlock + 6, width: leftW - 12, height: 30)
+        alle.frame = NSRect(x: 12, y: H - bottomBlock + 6, width: leftW - 24, height: 30)
         root.addSubview(alle)
         alleButton = alle
 
         // Search field.
-        searchField.frame = NSRect(x: 12, y: H - 42, width: leftW - 24, height: 30)
+        searchField.frame = NSRect(x: 14, y: H - 42, width: leftW - 28, height: 30)
         searchField.placeholderString = "Programme/Dateien durchsuchen"
         searchField.delegate = self
         searchField.bezelStyle = .roundedBezel
@@ -99,14 +128,12 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         let innerX = leftW + 20
         let innerW = (W - leftW) - 38
 
-        // Avatar at the very top of the right column.
-        let avatarSize: CGFloat = 66
-        let avatar = AvatarView(frame: NSRect(x: leftW + (W - leftW - avatarSize) / 2, y: 10,
-                                              width: avatarSize, height: avatarSize))
-        root.addSubview(avatar)
+        // (Avatar is added in buildContent so it can overhang the top edge.)
 
         // Right-column entries (title, gapBefore, bold, action).
-        let user = NSFullUserName().isEmpty ? NSUserName() : NSFullUserName()
+        let user: String = UserDefaults.standard.bool(forKey: "demoMode")
+            ? "Max Mustermann"
+            : (NSFullUserName().isEmpty ? NSUserName() : NSFullUserName())
         let entries: [(String, Bool, Bool, () -> Void)] = [
             (user,                 false, true,  { [weak self] in self?.openPath(NSHomeDirectory()) }),
             ("Dokumente",          true,  false, { [weak self] in self?.openHome("Documents") }),
@@ -120,27 +147,45 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
             ("Hilfe und Support",  false, false, { [weak self] in self?.openURL("https://support.apple.com/de-de") }),
         ]
 
-        var y: CGFloat = 90
+        var y: CGFloat = 64
         for (title, gap, bold, action) in entries {
-            if gap { y += 12 }
+            if gap {
+                y += 12
+                // Visual separators between Musik|Spiele and Computer|Systemsteuerung.
+                if title == "Spiele" || title == "Systemsteuerung" {
+                    addSeparator(at: y - 7, x: innerX, width: innerW)
+                }
+            }
             let row = RightRowButton(title: title, bold: bold, action: action)
             row.frame = NSRect(x: innerX, y: y, width: innerW, height: 40)
             root.addSubview(row)
             y += 40
         }
 
-        // Shut-down split button, bottom-right.
+        // Shut-down split button (Windows-7 silver style), bottom-right.
         let shutW: CGFloat = innerW - 30
-        let shut = NSButton(title: "Herunterfahren", target: self, action: #selector(shutdownAction))
-        shut.bezelStyle = .rounded
-        shut.font = NSFont.systemFont(ofSize: 13)
-        shut.frame = NSRect(x: innerX, y: H - 50, width: shutW, height: 32)
+        let shut = Win7Button(title: "Herunterfahren")
+        shut.onClick = { [weak self] in self?.shutdownAction() }
+        shut.frame = NSRect(x: innerX, y: H - 46, width: shutW, height: 28)
         root.addSubview(shut)
 
-        let arrow = NSButton(title: "▸", target: self, action: #selector(powerMenuAction(_:)))
-        arrow.bezelStyle = .rounded
-        arrow.frame = NSRect(x: innerX + shutW + 2, y: H - 50, width: 28, height: 32)
+        let arrow = Win7Button(title: "▶")
+        arrow.frame = NSRect(x: innerX + shutW + 2, y: H - 46, width: 26, height: 28)
+        arrow.onClick = { [weak self, weak arrow] in if let a = arrow { self?.showPowerMenu(from: a) } }
         root.addSubview(arrow)
+    }
+
+    /// A subtle engraved separator line (dark + light) in the right column.
+    private func addSeparator(at y: CGFloat, x: CGFloat, width: CGFloat) {
+        let dark = NSView(frame: NSRect(x: x, y: y, width: width, height: 1))
+        dark.wantsLayer = true
+        dark.layer?.backgroundColor = NSColor(calibratedWhite: 0, alpha: 0.18).cgColor
+        root.addSubview(dark)
+
+        let light = NSView(frame: NSRect(x: x, y: y + 1, width: width, height: 1))
+        light.wantsLayer = true
+        light.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.40).cgColor
+        root.addSubview(light)
     }
 
     // MARK: - Data
@@ -176,6 +221,67 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
                                        StartPins.toggle(e.bundleID)
                                        self?.reloadList(filter: self?.searchField.stringValue ?? "")
                                    })
+            listStack.addArrangedSubview(row)
+        }
+
+        // When searching, also look for files & folders via Spotlight (async).
+        if needle.count >= 2 {
+            searchFiles(filter.trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    // MARK: - File & folder search (Spotlight)
+
+    private func searchFiles(_ query: String) {
+        fileSearchToken += 1
+        let token = fileSearchToken
+        DispatchQueue.global(qos: .userInitiated).async {
+            let results = StartMenuController.runMdfind(query)
+            DispatchQueue.main.async {
+                guard token == self.fileSearchToken,
+                      self.searchField.stringValue.trimmingCharacters(in: .whitespaces) == query
+                else { return }
+                self.appendFileResults(results)
+            }
+        }
+    }
+
+    private static func runMdfind(_ query: String) -> [AppEntry] {
+        let p = Process()
+        p.launchPath = "/usr/bin/mdfind"
+        p.arguments = ["-name", query]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = Pipe()
+        guard (try? p.run()) != nil else { return [] }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard let str = String(data: data, encoding: .utf8) else { return [] }
+
+        var seen = Set<String>()
+        var out: [AppEntry] = []
+        for line in str.split(separator: "\n") {
+            let path = String(line)
+            if path.contains(".app/") || path.hasSuffix(".app") { continue }  // apps handled separately
+            guard !seen.contains(path), FileManager.default.fileExists(atPath: path) else { continue }
+            seen.insert(path)
+            out.append(AppEntry(name: (path as NSString).lastPathComponent,
+                                url: URL(fileURLWithPath: path), bundleID: nil))
+            if out.count >= 12 { break }
+        }
+        return out
+    }
+
+    private func appendFileResults(_ entries: [AppEntry]) {
+        guard !entries.isEmpty else { return }
+        let header = NSTextField(labelWithString: "Dateien & Ordner")
+        header.font = NSFont.boldSystemFont(ofSize: 11)
+        header.textColor = NSColor(calibratedWhite: 0.45, alpha: 1)
+        listStack.addArrangedSubview(header)
+        for e in entries {
+            let row = AppRowButton(entry: e, pinned: false,
+                                   onOpen: { [weak self] x in NSWorkspace.shared.open(x.url); self?.hide() },
+                                   onTogglePin: { _ in })
             listStack.addArrangedSubview(row)
         }
     }
@@ -236,7 +342,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
 
     @objc private func shutdownAction() { runOSA("tell application \"System Events\" to shut down") }
 
-    @objc private func powerMenuAction(_ sender: NSButton) {
+    private func showPowerMenu(from sender: NSView) {
         let menu = NSMenu()
         let items: [(String, String)] = [
             ("Energie sparen", "tell application \"System Events\" to sleep"),
@@ -269,46 +375,169 @@ final class KeyableWindow: NSWindow {
 
 final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// Background: a translucent accent-coloured frosted layer over the whole menu, with a SOLID
+/// white program panel on the left. The 5px gap around the white panel forms an accent-coloured
+/// border that blends seamlessly into the (right) accent area.
+private final class ColumnTintView: NSView {
+    private let border: CGFloat = 10
 
     override func draw(_ dirtyRect: NSRect) {
-        guard bounds.width > Theme.startLeftWidth else { return } // only the root paints columns
-        // Left column: white.
+        // Rich accent gradient across the menu: medium-blue at top with a soft highlight,
+        // deepening toward the bottom. Fairly opaque for a solid Aero-glass look.
+        let a: CGFloat = 0.6
+        let gradient = NSGradient(colors: [
+            Theme.accent(brightness: 0.90, saturation: 0.90).withAlphaComponent(a),   // top
+            Theme.accent(brightness: 0.99, saturation: 0.78).withAlphaComponent(a),   // highlight near top
+            Theme.accent(brightness: 0.76, saturation: 1.00).withAlphaComponent(a),   // middle
+            Theme.accent(brightness: 0.50, saturation: 1.00).withAlphaComponent(a),   // bottom
+        ], atLocations: [0.0, 0.18, 0.55, 1.0], colorSpace: .sRGB)
+        gradient?.draw(in: bounds, angle: -90)
+
+        // Solid (opaque) white program panel, inset by the border on left/top/bottom; its right
+        // edge sits `border` px short of the column boundary → accent frame all around.
+        let panel = NSRect(x: border, y: border,
+                           width: Theme.startLeftWidth - 2 * border,
+                           height: bounds.height - 2 * border)
         NSColor.white.setFill()
-        NSRect(x: 0, y: 0, width: Theme.startLeftWidth, height: bounds.height).fill()
-
-        // Right column: gradient derived from the macOS accent colour (darkened so white text stays readable).
-        let rightRect = NSRect(x: Theme.startLeftWidth, y: 0,
-                               width: bounds.width - Theme.startLeftWidth, height: bounds.height)
-        let top = Theme.accent(brightness: 0.98, saturation: 0.85)
-        let bottom = Theme.accent(brightness: 0.62, saturation: 1.0)
-        NSGradient(colors: [top, bottom])?.draw(in: rightRect, angle: 90)
-
-        // Thin divider between the two columns.
-        NSColor(calibratedWhite: 1.0, alpha: 0.5).setStroke()
-        let sep = NSBezierPath()
-        sep.move(to: NSPoint(x: Theme.startLeftWidth, y: 0))
-        sep.line(to: NSPoint(x: Theme.startLeftWidth, y: bounds.height))
-        sep.lineWidth = 1
-        sep.stroke()
+        NSBezierPath(roundedRect: panel, xRadius: 6, yRadius: 6).fill()
     }
 }
 
 // MARK: - Avatar
 
 private final class AvatarView: NSView {
-    override func draw(_ dirtyRect: NSRect) {
-        // Glassy framed square, like the default Windows user picture frame.
-        let frame = bounds.insetBy(dx: 1, dy: 1)
-        let path = NSBezierPath(roundedRect: frame, xRadius: 6, yRadius: 6)
-        NSGradient(colors: [NSColor(calibratedWhite: 0.97, alpha: 1),
-                            NSColor(calibratedWhite: 0.85, alpha: 1)])?.draw(in: path, angle: -90)
-        NSColor.white.setStroke(); path.lineWidth = 2; path.stroke()
+    /// The macOS account picture of the current user, if available.
+    private static let accountImage: NSImage? = {
+        let authority = CBIdentityAuthority.default()
+        guard let identity = CBIdentity(name: NSUserName(), authority: authority) else { return nil }
+        return identity.image
+    }()
 
-        let img = NSImage(systemSymbolName: "person.crop.circle.fill", accessibilityDescription: nil)
-        img?.isTemplate = false
-        let inset = frame.insetBy(dx: 7, dy: 7)
-        NSColor(calibratedRed: 0.30, green: 0.52, blue: 0.80, alpha: 1).set()
-        img?.draw(in: inset)
+    override func draw(_ dirtyRect: NSRect) {
+        let outer = bounds.insetBy(dx: 1, dy: 1)
+        let outerPath = NSBezierPath(roundedRect: outer, xRadius: 9, yRadius: 9)
+
+        // Glassy frame body, tinted with the accent colour (light on top → accent at bottom).
+        let frameTop = Theme.accent(brightness: 1.5, saturation: 0.22)
+        let frameMid = Theme.accent(brightness: 1.15, saturation: 0.55)
+        let frameBot = Theme.accent(brightness: 0.80, saturation: 0.95)
+        NSGradient(colors: [frameTop, frameMid, frameBot],
+                   atLocations: [0, 0.5, 1], colorSpace: .sRGB)?.draw(in: outerPath, angle: -90)
+
+        // Gloss highlight over the upper half of the frame.
+        NSGraphicsContext.current?.saveGraphicsState()
+        outerPath.addClip()
+        let gloss = NSRect(x: outer.minX, y: outer.midY, width: outer.width, height: outer.height / 2)
+        NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.55),
+                            NSColor(calibratedWhite: 1, alpha: 0.0)])?.draw(in: gloss, angle: -90)
+        NSGraphicsContext.current?.restoreGraphicsState()
+
+        // Inner recess + picture.
+        let thickness: CGFloat = 7
+        let inner = outer.insetBy(dx: thickness, dy: thickness)
+        let innerPath = NSBezierPath(roundedRect: inner, xRadius: 4, yRadius: 4)
+        NSGraphicsContext.current?.saveGraphicsState()
+        innerPath.addClip()
+        if !UserDefaults.standard.bool(forKey: "demoMode"), let img = AvatarView.accountImage {
+            let side = max(inner.width, inner.height)
+            img.draw(in: NSRect(x: inner.midX - side / 2, y: inner.midY - side / 2, width: side, height: side))
+        } else {
+            NSColor(calibratedWhite: 0.95, alpha: 1).setFill(); innerPath.fill()
+            let glyph = NSImage(systemSymbolName: "person.crop.circle.fill", accessibilityDescription: nil)
+            NSColor(calibratedRed: 0.30, green: 0.52, blue: 0.80, alpha: 1).set()
+            glyph?.draw(in: inner.insetBy(dx: 4, dy: 4))
+        }
+        NSGraphicsContext.current?.restoreGraphicsState()
+
+        // Bevel: dark recess line around the photo, dark hairline + white highlight on the frame.
+        NSColor(calibratedWhite: 0, alpha: 0.35).setStroke(); innerPath.lineWidth = 1.5; innerPath.stroke()
+        NSColor(calibratedWhite: 0, alpha: 0.40).setStroke(); outerPath.lineWidth = 1; outerPath.stroke()
+        let hi = NSBezierPath(roundedRect: outer.insetBy(dx: 1.5, dy: 1.5), xRadius: 8, yRadius: 8)
+        NSColor(calibratedWhite: 1, alpha: 0.5).setStroke(); hi.lineWidth = 1; hi.stroke()
+    }
+}
+
+// MARK: - Windows-7 style silver button
+
+private final class Win7Button: NSControl {
+    var onClick: (() -> Void)?
+    private let title: String
+    private var hovering = false
+    private var pressed = false
+
+    init(title: String) {
+        self.title = title
+        super.init(frame: .zero)
+        addTrackingArea(NSTrackingArea(rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func mouseDown(with event: NSEvent) { pressed = true; needsDisplay = true }
+    override func mouseUp(with event: NSEvent) {
+        pressed = false; needsDisplay = true
+        let p = convert(event.locationInWindow, from: nil)
+        if bounds.contains(p) { onClick?() }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3)
+
+        // Accent-coloured glass: lighter top half, darker bottom, with a two-tone step.
+        let colors: [NSColor]
+        let border: NSColor
+        if pressed {
+            colors = [Theme.accent(brightness: 0.62, saturation: 1.0), Theme.accent(brightness: 0.72, saturation: 0.95),
+                      Theme.accent(brightness: 0.8, saturation: 0.9), Theme.accent(brightness: 0.88, saturation: 0.85)]
+            border = Theme.accent(brightness: 0.5)
+        } else if hovering {
+            colors = [Theme.accent(brightness: 1.45, saturation: 0.45), Theme.accent(brightness: 1.2, saturation: 0.65),
+                      Theme.accent(brightness: 0.95, saturation: 0.9), Theme.accent(brightness: 1.1, saturation: 0.8)]
+            border = Theme.accent(brightness: 1.2)
+        } else {
+            colors = [Theme.accent(brightness: 1.35, saturation: 0.5), Theme.accent(brightness: 1.08, saturation: 0.7),
+                      Theme.accent(brightness: 0.8, saturation: 0.95), Theme.accent(brightness: 0.96, saturation: 0.85)]
+            border = Theme.accent(brightness: 0.6)
+        }
+        // More translucent button fill.
+        let faded = colors.map { $0.withAlphaComponent(0.5) }
+        NSGradient(colors: faded, atLocations: [0.0, 0.49, 0.5, 1.0], colorSpace: .sRGB)?
+            .draw(in: path, angle: -90)
+
+        // Glass gloss over the top half.
+        NSGraphicsContext.current?.saveGraphicsState()
+        path.addClip()
+        let gloss = NSRect(x: r.minX, y: r.midY, width: r.width, height: r.height / 2)
+        NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.45),
+                            NSColor(calibratedWhite: 1, alpha: 0.0)])?.draw(in: gloss, angle: -90)
+        NSGraphicsContext.current?.restoreGraphicsState()
+
+        // Top inner highlight + outer border.
+        NSColor(calibratedWhite: 1, alpha: 0.45).setStroke()
+        let hi = NSBezierPath(roundedRect: r.insetBy(dx: 1, dy: 1), xRadius: 2.5, yRadius: 2.5)
+        hi.lineWidth = 1; hi.stroke()
+        border.withAlphaComponent(0.7).setStroke(); path.lineWidth = 1; path.stroke()
+
+        // White label with a soft shadow (glass look), slightly larger.
+        let style = NSMutableParagraphStyle(); style.alignment = .center
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.4)
+        shadow.shadowBlurRadius = 1.5
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: style,
+            .shadow: shadow,
+        ]
+        let s = NSAttributedString(string: title, attributes: attrs)
+        s.draw(in: NSRect(x: 0, y: (bounds.height - s.size().height) / 2 + (pressed ? -0.5 : 0),
+                          width: bounds.width, height: s.size().height))
     }
 }
 
