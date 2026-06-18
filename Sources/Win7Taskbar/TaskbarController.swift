@@ -185,6 +185,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
     func taskbarButtonClicked(_ item: TaskbarItem) {
         if let app = item.runningApp, !app.isTerminated {
+            // Option: Finder always opens a brand-new window on click.
+            if app.bundleIdentifier == "com.apple.finder" && Self.finderAlwaysNewWindow {
+                openNewFinderWindow()
+                return
+            }
             let pid = app.processIdentifier
             let s = WindowPreview.windowSummary(pid: pid)
             if s.visible > 0 {
@@ -273,6 +278,12 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         res.state = reserver.enabled ? .on : .off
         menu.addItem(res)
 
+        let finder = NSMenuItem(title: "Finder-Klick öffnet immer neues Fenster",
+                                action: #selector(toggleFinderNewWindow), keyEquivalent: "")
+        finder.target = self
+        finder.state = Self.finderAlwaysNewWindow ? .on : .off
+        menu.addItem(finder)
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Taskleiste beenden", action: #selector(quitApp), keyEquivalent: "")
         quit.target = self
@@ -282,6 +293,24 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     }
 
     @objc private func toggleDock() { DockHelper.toggle() }
+
+    // Option: clicking the Finder icon always opens a fresh Finder window.
+    static var finderAlwaysNewWindow: Bool {
+        UserDefaults.standard.bool(forKey: "finderAlwaysNewWindow")
+    }
+    @objc private func toggleFinderNewWindow() {
+        UserDefaults.standard.set(!Self.finderAlwaysNewWindow, forKey: "finderAlwaysNewWindow")
+    }
+
+    private func openNewFinderWindow() {
+        let p = Process()
+        p.launchPath = "/usr/bin/osascript"
+        p.arguments = ["-e", "tell application \"Finder\"",
+                       "-e", "activate",
+                       "-e", "make new Finder window",
+                       "-e", "end tell"]
+        try? p.run()
+    }
 
     @objc private func toggleReserve() {
         if reserver.enabled {
