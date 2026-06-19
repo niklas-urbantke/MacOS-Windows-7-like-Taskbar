@@ -622,8 +622,22 @@ private final class RightRowButton: NSControl {
 
     override func draw(_ dirtyRect: NSRect) {
         if hovering {
-            Theme.rightHover.setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill()
+            // Glassy Aero hover frame.
+            let r = bounds.insetBy(dx: 1, dy: 2)
+            let path = NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4)
+            NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.30),
+                                NSColor(calibratedWhite: 1, alpha: 0.10)])?.draw(in: path, angle: -90)
+            // Top gloss highlight.
+            NSGraphicsContext.current?.saveGraphicsState()
+            path.addClip()
+            let gloss = NSRect(x: r.minX, y: r.midY, width: r.width, height: r.height / 2)
+            NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.38),
+                                NSColor(calibratedWhite: 1, alpha: 0.0)])?.draw(in: gloss, angle: -90)
+            NSGraphicsContext.current?.restoreGraphicsState()
+            // Subtle border.
+            NSColor(calibratedWhite: 1, alpha: 0.55).setStroke()
+            path.lineWidth = 1
+            path.stroke()
         }
         let font = bold ? NSFont.boldSystemFont(ofSize: 16.5) : NSFont.systemFont(ofSize: 15)
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
