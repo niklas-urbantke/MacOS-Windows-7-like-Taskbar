@@ -332,7 +332,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         showingAll = false
         alleButton?.setTitle("Alle Programme", back: false)
         searchField.stringValue = ""
-        tint.needsDisplay = true   // reflect a possible style change
+        root.subviews.forEach { $0.needsDisplay = true }   // reflect a possible style change
         reloadList(filter: "")
 
         let x = max(screen.frame.minX, orbScreenRect.minX)
@@ -579,24 +579,44 @@ private final class Win7Button: NSControl {
         let r = bounds.insetBy(dx: 0.5, dy: 0.5)
         let path = NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3)
 
-        // Accent-coloured glass: lighter top half, darker bottom, with a two-tone step.
+        let aero = UserDefaults.standard.string(forKey: "menuStyle") == "aero"
         let colors: [NSColor]
         let border: NSColor
-        if pressed {
-            colors = [Theme.accent(brightness: 0.62, saturation: 1.0), Theme.accent(brightness: 0.72, saturation: 0.95),
-                      Theme.accent(brightness: 0.8, saturation: 0.9), Theme.accent(brightness: 0.88, saturation: 0.85)]
-            border = Theme.accent(brightness: 0.5)
-        } else if hovering {
-            colors = [Theme.accent(brightness: 1.45, saturation: 0.45), Theme.accent(brightness: 1.2, saturation: 0.65),
-                      Theme.accent(brightness: 0.95, saturation: 0.9), Theme.accent(brightness: 1.1, saturation: 0.8)]
-            border = Theme.accent(brightness: 1.2)
+        let textColor: NSColor
+        let fillAlpha: CGFloat
+
+        if aero {
+            // Silver Win7 glass to match the dark Aero menu.
+            func g(_ v: CGFloat) -> NSColor { NSColor(calibratedWhite: v, alpha: 1) }
+            if pressed {
+                colors = [g(0.78), g(0.84), g(0.88), g(0.90)]; border = g(0.45)
+            } else if hovering {
+                colors = [g(1.00), g(0.96), g(0.90), g(0.96)]; border = g(0.50)
+            } else {
+                colors = [g(0.99), g(0.93), g(0.85), g(0.92)]; border = g(0.55)
+            }
+            textColor = .white
+            fillAlpha = 0.3
         } else {
-            colors = [Theme.accent(brightness: 1.35, saturation: 0.5), Theme.accent(brightness: 1.08, saturation: 0.7),
-                      Theme.accent(brightness: 0.8, saturation: 0.95), Theme.accent(brightness: 0.96, saturation: 0.85)]
-            border = Theme.accent(brightness: 0.6)
+            // Accent-coloured glass.
+            if pressed {
+                colors = [Theme.accent(brightness: 0.62, saturation: 1.0), Theme.accent(brightness: 0.72, saturation: 0.95),
+                          Theme.accent(brightness: 0.8, saturation: 0.9), Theme.accent(brightness: 0.88, saturation: 0.85)]
+                border = Theme.accent(brightness: 0.5)
+            } else if hovering {
+                colors = [Theme.accent(brightness: 1.45, saturation: 0.45), Theme.accent(brightness: 1.2, saturation: 0.65),
+                          Theme.accent(brightness: 0.95, saturation: 0.9), Theme.accent(brightness: 1.1, saturation: 0.8)]
+                border = Theme.accent(brightness: 1.2)
+            } else {
+                colors = [Theme.accent(brightness: 1.35, saturation: 0.5), Theme.accent(brightness: 1.08, saturation: 0.7),
+                          Theme.accent(brightness: 0.8, saturation: 0.95), Theme.accent(brightness: 0.96, saturation: 0.85)]
+                border = Theme.accent(brightness: 0.6)
+            }
+            textColor = .white
+            fillAlpha = 0.5
         }
-        // More translucent button fill.
-        let faded = colors.map { $0.withAlphaComponent(0.5) }
+
+        let faded = colors.map { $0.withAlphaComponent(fillAlpha) }
         NSGradient(colors: faded, atLocations: [0.0, 0.49, 0.5, 1.0], colorSpace: .sRGB)?
             .draw(in: path, angle: -90)
 
@@ -614,18 +634,18 @@ private final class Win7Button: NSControl {
         hi.lineWidth = 1; hi.stroke()
         border.withAlphaComponent(0.7).setStroke(); path.lineWidth = 1; path.stroke()
 
-        // White label with a soft shadow (glass look), slightly larger.
+        // Label — white (accent) with a soft shadow, or dark (silver/aero).
         let style = NSMutableParagraphStyle(); style.alignment = .center
+        var attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+            .foregroundColor: textColor,
+            .paragraphStyle: style,
+        ]
         let shadow = NSShadow()
         shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.4)
         shadow.shadowBlurRadius = 1.5
         shadow.shadowOffset = NSSize(width: 0, height: -1)
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
-            .foregroundColor: NSColor.white,
-            .paragraphStyle: style,
-            .shadow: shadow,
-        ]
+        attrs[.shadow] = shadow
         let s = NSAttributedString(string: title, attributes: attrs)
         s.draw(in: NSRect(x: 0, y: (bounds.height - s.size().height) / 2 + (pressed ? -0.5 : 0),
                           width: bounds.width, height: s.size().height))
