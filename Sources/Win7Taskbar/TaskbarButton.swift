@@ -82,6 +82,22 @@ final class TaskbarButton: NSControl {
     override func rightMouseDown(with event: NSEvent) {
         let menu = NSMenu()
 
+        // App-specific actions (e.g. Chromium profiles), like a Win7 jump list.
+        let jump = JumpList.actions(for: item)
+        if !jump.isEmpty {
+            let header = NSMenuItem(title: item.name, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            for action in jump {
+                let mi = NSMenuItem(title: action.title, action: #selector(jumpAction(_:)), keyEquivalent: "")
+                mi.target = self
+                mi.representedObject = action
+                mi.indentationLevel = 1
+                menu.addItem(mi)
+            }
+            menu.addItem(.separator())
+        }
+
         let pinTitle = item.pinned ? "Von Taskleiste lösen" : "An Taskleiste anheften"
         let pin = NSMenuItem(title: pinTitle, action: #selector(pinAction), keyEquivalent: "")
         pin.target = self
@@ -95,6 +111,10 @@ final class TaskbarButton: NSControl {
             menu.addItem(quit)
         }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    @objc private func jumpAction(_ sender: NSMenuItem) {
+        (sender.representedObject as? JumpList.Action)?.perform()
     }
 
     @objc private func pinAction() { buttonDelegate?.taskbarButtonToggledPin(item) }
