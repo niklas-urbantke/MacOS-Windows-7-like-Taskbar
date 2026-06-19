@@ -6,10 +6,12 @@ import Collaboration
 final class StartMenuController: NSObject, NSTextFieldDelegate {
     private let window: NSWindow
     private let root = FlippedView()
-    private let listStack = NSStackView()
     private let scrollView = NSScrollView()
     private let searchField = NSTextField()
     private let tint = ColumnTintView(frame: .zero)
+    private let listDoc = FlippedView()        // manual-layout document view (fast for long lists)
+    private var listY: CGFloat = 0
+    private static var iconCache: [String: NSImage] = [:]
     private var allApps: [AppEntry] = []
     private var showingAll = false
     private var alleButton: LeftRowButton?
@@ -91,22 +93,8 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         scrollView.drawsBackground = false
         scrollView.autohidesScrollers = true
 
-        listStack.orientation = .vertical
-        listStack.alignment = .leading
-        listStack.spacing = 1
-        listStack.translatesAutoresizingMaskIntoConstraints = false
-
-        let doc = FlippedView()
-        doc.translatesAutoresizingMaskIntoConstraints = false
-        doc.addSubview(listStack)
-        scrollView.documentView = doc
-        NSLayoutConstraint.activate([
-            listStack.topAnchor.constraint(equalTo: doc.topAnchor),
-            listStack.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
-            listStack.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
-            listStack.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
-            doc.widthAnchor.constraint(equalToConstant: leftW - 12 - 16),
-        ])
+        listDoc.frame = NSRect(x: 0, y: 0, width: leftW - 24, height: 10)
+        scrollView.documentView = listDoc
         root.addSubview(scrollView)
 
         // "Alle Programme" / "Zurück" toggle row.
@@ -199,8 +187,54 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         reloadList(filter: searchField.stringValue)
     }
 
+    // MARK: - List layout (manual, for speed)
+
+    private func resetList() {
+        listDoc.subviews.forEach { $0.removeFromSuperview() }
+        listY = 0
+    }
+
+    private func appendRow(_ view: NSView, height: CGFloat) {
+        let w = scrollView.contentSize.width
+        view.frame = NSRect(x: 0, y: listY, width: w, height: height)
+        view.autoresizingMask = [.width]
+        listDoc.addSubview(view)
+        listY += height
+        listDoc.frame = NSRect(x: 0, y: 0, width: w, height: max(listY, scrollView.contentSize.height))
+    }
+
+    private func makeAppRow(_ app: AppEntry, file: Bool) -> AppRowButton {
+        let row = AppRowButton(entry: app,
+                               pinned: file ? false : StartPins.isPinned(app.bundleID),
+                               onOpen: { [weak self] e in
+                                   if file { NSWorkspace.shared.open(e.url); self?.hide() }
+                                   else { self?.launch(e) }
+                               },
+                               onTogglePin: { [weak self] e in
+                                   StartPins.toggle(e.bundleID)
+                                   self?.reloadList(filter: self?.searchField.stringValue ?? "")
+                               })
+        if let cached = StartMenuController.iconCache[app.url.path] { row.iconImage = cached }
+        return row
+    }
+
+    /// Load missing icons off the main thread, then apply + cache.
+    private func loadIcons(_ pending: [(AppRowButton, String)]) {
+        guard !pending.isEmpty else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            for (row, path) in pending {
+                let img = NSWorkspace.shared.icon(forFile: path)
+                img.size = NSSize(width: 36, height: 36)
+                DispatchQueue.main.async {
+                    StartMenuController.iconCache[path] = img
+                    row.updateIcon(img)
+                }
+            }
+        }
+    }
+
     private func reloadList(filter: String) {
-        listStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        resetList()
         let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
 
         let apps: [AppEntry]
@@ -209,7 +243,6 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         } else if showingAll {
             apps = allApps
         } else {
-            // Pinned first, then recently opened (without duplicates).
             let pinned = StartPins.entries()
             let pinnedIDs = Set(pinned.compactMap { $0.bundleID })
             let recents = RecentsStore.recent().filter { !pinnedIDs.contains($0.bundleID ?? "") }
@@ -217,16 +250,13 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         }
 
         firstResult = apps.first
+        var pending: [(AppRowButton, String)] = []
         for app in apps.prefix(300) {
-            let row = AppRowButton(entry: app,
-                                   pinned: StartPins.isPinned(app.bundleID),
-                                   onOpen: { [weak self] e in self?.launch(e) },
-                                   onTogglePin: { [weak self] e in
-                                       StartPins.toggle(e.bundleID)
-                                       self?.reloadList(filter: self?.searchField.stringValue ?? "")
-                                   })
-            listStack.addArrangedSubview(row)
+            let row = makeAppRow(app, file: false)
+            if row.iconImage == nil { pending.append((row, app.url.path)) }
+            appendRow(row, height: 50)
         }
+        loadIcons(pending)
 
         // When searching, also look for files & folders via Spotlight (async).
         if needle.count >= 2 {
@@ -278,16 +308,17 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
 
     private func appendFileResults(_ entries: [AppEntry]) {
         guard !entries.isEmpty else { return }
-        let header = NSTextField(labelWithString: "Dateien & Ordner")
+        let header = NSTextField(labelWithString: "  Dateien & Ordner")
         header.font = NSFont.boldSystemFont(ofSize: 11)
         header.textColor = NSColor(calibratedWhite: 0.45, alpha: 1)
-        listStack.addArrangedSubview(header)
+        appendRow(header, height: 22)
+        var pending: [(AppRowButton, String)] = []
         for e in entries {
-            let row = AppRowButton(entry: e, pinned: false,
-                                   onOpen: { [weak self] x in NSWorkspace.shared.open(x.url); self?.hide() },
-                                   onTogglePin: { _ in })
-            listStack.addArrangedSubview(row)
+            let row = makeAppRow(e, file: true)
+            if row.iconImage == nil { pending.append((row, e.url.path)) }
+            appendRow(row, height: 50)
         }
+        loadIcons(pending)
     }
 
     // MARK: - Show / hide
@@ -701,19 +732,20 @@ private final class AppRowButton: NSControl {
     private let onOpen: (AppEntry) -> Void
     private let onTogglePin: (AppEntry) -> Void
     private var hovering = false
+    var iconImage: NSImage?
 
     init(entry: AppEntry, pinned: Bool,
          onOpen: @escaping (AppEntry) -> Void,
          onTogglePin: @escaping (AppEntry) -> Void) {
         self.entry = entry; self.pinned = pinned; self.onOpen = onOpen; self.onTogglePin = onTogglePin
         super.init(frame: NSRect(x: 0, y: 0, width: Theme.startLeftWidth - 28, height: 50))
-        translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 50).isActive = true
-        widthAnchor.constraint(equalToConstant: Theme.startLeftWidth - 28).isActive = true
         let a = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
         addTrackingArea(a)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    func updateIcon(_ img: NSImage?) { iconImage = img; needsDisplay = true }
+
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func mouseDown(with event: NSEvent) { onOpen(entry) }
@@ -735,7 +767,7 @@ private final class AppRowButton: NSControl {
             p.fill(); Theme.accent(brightness: 1.1, alpha: 0.6).setStroke(); p.lineWidth = 1; p.stroke()
         }
         let iconS: CGFloat = 36
-        entry.icon.draw(in: NSRect(x: 8, y: (bounds.height - iconS) / 2, width: iconS, height: iconS))
+        iconImage?.draw(in: NSRect(x: 8, y: (bounds.height - iconS) / 2, width: iconS, height: iconS))
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 15.5),
             .foregroundColor: NSColor(calibratedWhite: 0.10, alpha: 1),
