@@ -17,6 +17,8 @@ final class SettingsWindowController: NSObject {
     private let fullHeightBox = NSButton(checkboxWithTitle: "Icon-Rahmen über volle Höhe", target: nil, action: nil)
     private let orbPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private var orbs: [(label: String, file: String)] = []
+    private let menuStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let menuStyles: [(label: String, value: String)] = [("Akzentfarbe", "accent"), ("Taskbar (Aero)", "aero")]
 
     func show() {
         if window == nil { build() }
@@ -45,6 +47,15 @@ final class SettingsWindowController: NSObject {
         orbRow.orientation = .horizontal
         orbRow.spacing = 8
 
+        // Start-menu style.
+        menuStylePopup.removeAllItems()
+        menuStylePopup.addItems(withTitles: menuStyles.map { $0.label })
+        menuStylePopup.target = self
+        menuStylePopup.action = #selector(menuStyleChanged)
+        let styleRow = NSStackView(views: [NSTextField(labelWithString: "Startmenü-Stil:"), menuStylePopup])
+        styleRow.orientation = .horizontal
+        styleRow.spacing = 8
+
         for box in [dockBox, reserveBox, finderBox, finderDesktopBox, nowPlayingBox,
                     wifiBox, monitorBox, autostartBox, fullHeightBox] {
             box.target = self
@@ -55,7 +66,7 @@ final class SettingsWindowController: NSObject {
         let tabView = NSTabView()
         tabView.translatesAutoresizingMaskIntoConstraints = false
         tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox]))
-        tabView.addTabViewItem(makeTab("Darstellung", [orbRow, fullHeightBox]))
+        tabView.addTabViewItem(makeTab("Darstellung", [orbRow, styleRow, fullHeightBox]))
         tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox]))
         tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox]))
 
@@ -111,6 +122,9 @@ final class SettingsWindowController: NSObject {
         if let idx = orbs.firstIndex(where: { $0.file == c.selectedOrbFile }) {
             orbPopup.selectItem(at: idx)
         }
+        if let idx = menuStyles.firstIndex(where: { $0.value == c.menuStyle }) {
+            menuStylePopup.selectItem(at: idx)
+        }
     }
 
     @objc private func orbChanged() {
@@ -127,6 +141,12 @@ final class SettingsWindowController: NSObject {
            let idx = orbs.firstIndex(where: { $0.file == file }) {
             orbPopup.selectItem(at: idx)
         }
+    }
+
+    @objc private func menuStyleChanged() {
+        let i = menuStylePopup.indexOfSelectedItem
+        guard i >= 0, i < menuStyles.count else { return }
+        controller?.setMenuStyle(menuStyles[i].value)
     }
 
     @objc private func addOrbAction() {

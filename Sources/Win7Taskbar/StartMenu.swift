@@ -9,6 +9,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private let listStack = NSStackView()
     private let scrollView = NSScrollView()
     private let searchField = NSTextField()
+    private let tint = ColumnTintView(frame: .zero)
     private var allApps: [AppEntry] = []
     private var showingAll = false
     private var alleButton: LeftRowButton?
@@ -63,7 +64,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         blur.alphaValue = 0.45   // weniger Blur
         root.addSubview(blur)
 
-        let tint = ColumnTintView(frame: root.bounds)
+        tint.frame = root.bounds
         tint.autoresizingMask = [.width, .height]
         root.addSubview(tint)
 
@@ -299,6 +300,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         showingAll = false
         alleButton?.setTitle("Alle Programme", back: false)
         searchField.stringValue = ""
+        tint.needsDisplay = true   // reflect a possible style change
         reloadList(filter: "")
 
         let x = max(screen.frame.minX, orbScreenRect.minX)
@@ -427,19 +429,31 @@ private final class ColumnTintView: NSView {
     private let border: CGFloat = 10
 
     override func draw(_ dirtyRect: NSRect) {
-        // Rich accent gradient across the menu: medium-blue at top with a soft highlight,
-        // deepening toward the bottom. Fairly opaque for a solid Aero-glass look.
-        let a: CGFloat = 0.6
-        let gradient = NSGradient(colors: [
-            Theme.accent(brightness: 0.90, saturation: 0.90).withAlphaComponent(a),   // top
-            Theme.accent(brightness: 0.99, saturation: 0.78).withAlphaComponent(a),   // highlight near top
-            Theme.accent(brightness: 0.76, saturation: 1.00).withAlphaComponent(a),   // middle
-            Theme.accent(brightness: 0.50, saturation: 1.00).withAlphaComponent(a),   // bottom
-        ], atLocations: [0.0, 0.18, 0.55, 1.0], colorSpace: .sRGB)
-        gradient?.draw(in: bounds, angle: -90)
+        if UserDefaults.standard.string(forKey: "menuStyle") == "aero" {
+            // Dark Aero glass, like the taskbar.
+            let glass = NSGradient(colors: [
+                NSColor(calibratedWhite: 0.34, alpha: 0.55),
+                NSColor(calibratedWhite: 0.16, alpha: 0.60),
+                NSColor(calibratedWhite: 0.05, alpha: 0.72),
+            ], atLocations: [0.0, 0.5, 1.0], colorSpace: .deviceRGB)
+            glass?.draw(in: bounds, angle: -90)
+            // Glossy highlight over the top.
+            NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.22),
+                                NSColor(calibratedWhite: 1, alpha: 0.0)])?
+                .draw(in: NSRect(x: 0, y: bounds.midY, width: bounds.width, height: bounds.height / 2), angle: -90)
+        } else {
+            // Rich accent gradient: medium-blue at top with a soft highlight, deepening downward.
+            let a: CGFloat = 0.6
+            NSGradient(colors: [
+                Theme.accent(brightness: 0.90, saturation: 0.90).withAlphaComponent(a),
+                Theme.accent(brightness: 0.99, saturation: 0.78).withAlphaComponent(a),
+                Theme.accent(brightness: 0.76, saturation: 1.00).withAlphaComponent(a),
+                Theme.accent(brightness: 0.50, saturation: 1.00).withAlphaComponent(a),
+            ], atLocations: [0.0, 0.18, 0.55, 1.0], colorSpace: .sRGB)?.draw(in: bounds, angle: -90)
+        }
 
         // Solid (opaque) white program panel, inset by the border on left/top/bottom; its right
-        // edge sits `border` px short of the column boundary → accent frame all around.
+        // edge sits `border` px short of the column boundary → frame all around.
         let panel = NSRect(x: border, y: border,
                            width: Theme.startLeftWidth - 2 * border,
                            height: bounds.height - 2 * border)

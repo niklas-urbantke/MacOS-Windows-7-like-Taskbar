@@ -462,6 +462,10 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         buttons.forEach { $0.needsDisplay = true }
     }
 
+    // Startmenü-Stil: "accent" (Akzentfarbe) oder "aero" (Taskbar-Glas).
+    var menuStyle: String { UserDefaults.standard.string(forKey: "menuStyle") ?? "accent" }
+    func setMenuStyle(_ style: String) { UserDefaults.standard.set(style, forKey: "menuStyle") }
+
     // Start-Orb-Auswahl.
     var availableOrbs: [(label: String, file: String)] { OrbCatalog.available().map { ($0.label, $0.file) } }
     var selectedOrbFile: String { OrbCatalog.selectedFile }
