@@ -10,9 +10,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let battery = BatteryView()
     private let volume = TrayIconButton(symbol: "speaker.wave.2.fill")
     private let showDesktop = ShowDesktopButton()
+    private let nowPlayingView = NowPlayingView(frame: .zero)
     private let startMenu = StartMenuController()
     private let reserver = WindowSpaceReserver()
     private let preview = WindowPreviewController()
+    private let settings = SettingsWindowController()
 
     private var items: [TaskbarItem] = []
     private var buttons: [TaskbarButton] = []
@@ -21,6 +23,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let hasBattery = SystemInfo.battery() != nil
     private var hotkeyMonitors: [Any] = []
     private var hotkeyArmed = true
+    private var tick = 0
 
     // Button layout geometry + drag state.
     private var buttonStartX: CGFloat = 0
@@ -61,6 +64,9 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         DistributedNotificationCenter.default().addObserver(
             self, selector: #selector(testPreview),
             name: NSNotification.Name("de.batix.win7taskbar.testPreview"), object: nil)
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(openSettings),
+            name: NSNotification.Name("de.batix.win7taskbar.openSettings"), object: nil)
         rebuildItems()
         startClock()
 
@@ -98,36 +104,38 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
     private func buildChrome() {
         let h = Theme.barHeight
-        let w = glass.bounds.width
-
         orb.frame = NSRect(x: 0, y: 0, width: Theme.orbWidth, height: h)
         glass.addSubview(orb)
 
-        // Right side, laid out from the edge inward: show-desktop | clock | volume | battery.
-        var x = w
-        x -= Theme.showDesktopWidth
-        showDesktop.frame = NSRect(x: x, y: 0, width: Theme.showDesktopWidth, height: h)
-        showDesktop.autoresizingMask = [.minXMargin]
-        glass.addSubview(showDesktop)
+        for v in [showDesktop, clock, volume] { v.autoresizingMask = [.minXMargin]; glass.addSubview(v) }
+        if hasBattery { battery.autoresizingMask = [.minXMargin]; glass.addSubview(battery) }
+        nowPlayingView.autoresizingMask = [.minXMargin]
 
-        x -= Theme.clockWidth
-        clock.frame = NSRect(x: x, y: 0, width: Theme.clockWidth, height: h)
-        clock.autoresizingMask = [.minXMargin]
-        glass.addSubview(clock)
+        layoutTray()
+    }
 
-        x -= Theme.volumeWidth
-        volume.frame = NSRect(x: x, y: 0, width: Theme.volumeWidth, height: h)
-        volume.autoresizingMask = [.minXMargin]
-        glass.addSubview(volume)
+    /// Positions the tray (right side) and the now-playing widget, then re-lays out the buttons.
+    private func layoutTray() {
+        let h = Theme.barHeight
+        var x = glass.bounds.width
 
-        if hasBattery {
-            x -= Theme.batteryWidth
-            battery.frame = NSRect(x: x, y: 0, width: Theme.batteryWidth, height: h)
-            battery.autoresizingMask = [.minXMargin]
-            glass.addSubview(battery)
+        // From the edge inward: show-desktop | clock | volume | battery | now-playing.
+        x -= Theme.showDesktopWidth; showDesktop.frame = NSRect(x: x, y: 0, width: Theme.showDesktopWidth, height: h)
+        x -= Theme.clockWidth;       clock.frame       = NSRect(x: x, y: 0, width: Theme.clockWidth, height: h)
+        x -= Theme.volumeWidth;      volume.frame      = NSRect(x: x, y: 0, width: Theme.volumeWidth, height: h)
+        if hasBattery { x -= Theme.batteryWidth; battery.frame = NSRect(x: x, y: 0, width: Theme.batteryWidth, height: h) }
+
+        if nowPlayingEnabled {
+            x -= Theme.nowPlayingWidth
+            nowPlayingView.frame = NSRect(x: x, y: 0, width: Theme.nowPlayingWidth, height: h)
+            if nowPlayingView.superview == nil { glass.addSubview(nowPlayingView) }
+            nowPlayingView.refresh()
+        } else {
+            nowPlayingView.removeFromSuperview()
         }
 
         trayLeftX = x
+        layoutButtons()
     }
 
     // MARK: - Items
@@ -333,42 +341,41 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
     private func showOrbMenu() {
         let menu = NSMenu()
-
-        let dockTitle = DockHelper.isHidden ? "macOS-Dock wieder einblenden" : "macOS-Dock ausblenden"
-        let dock = NSMenuItem(title: dockTitle, action: #selector(toggleDock), keyEquivalent: "")
-        dock.target = self
-        menu.addItem(dock)
-
-        let resTitle = reserver.enabled
-            ? "Fensterbereich-Reservierung aus"
-            : "Fensterbereich reservieren (Bedienungshilfen)"
-        let res = NSMenuItem(title: resTitle, action: #selector(toggleReserve), keyEquivalent: "")
-        res.target = self
-        res.state = reserver.enabled ? .on : .off
-        menu.addItem(res)
-
-        let finder = NSMenuItem(title: "Finder-Klick öffnet immer neues Fenster",
-                                action: #selector(toggleFinderNewWindow), keyEquivalent: "")
-        finder.target = self
-        finder.state = Self.finderAlwaysNewWindow ? .on : .off
-        menu.addItem(finder)
-
+        let settingsItem = NSMenuItem(title: "Einstellungen…", action: #selector(openSettings), keyEquivalent: "")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Taskleiste beenden", action: #selector(quitApp), keyEquivalent: "")
         quit.target = self
         menu.addItem(quit)
-        let p = NSPoint(x: orb.frame.minX, y: orb.frame.maxY)
-        menu.popUp(positioning: nil, at: p, in: glass)
+        menu.popUp(positioning: nil, at: NSPoint(x: orb.frame.minX, y: orb.frame.maxY), in: glass)
     }
 
-    @objc private func toggleDock() { DockHelper.toggle() }
-
-    // Option: clicking the Finder icon always opens a fresh Finder window.
-    static var finderAlwaysNewWindow: Bool {
-        UserDefaults.standard.bool(forKey: "finderAlwaysNewWindow")
+    @objc private func openSettings() {
+        settings.controller = self
+        settings.show()
     }
-    @objc private func toggleFinderNewWindow() {
-        UserDefaults.standard.set(!Self.finderAlwaysNewWindow, forKey: "finderAlwaysNewWindow")
+    @objc private func quitApp() { NSApp.terminate(nil) }
+
+    // MARK: - Settings (used by the settings window)
+
+    var dockIsHidden: Bool { DockHelper.isHidden }
+    func setDockHidden(_ on: Bool) { if on != DockHelper.isHidden { DockHelper.toggle() } }
+
+    var reserveEnabled: Bool { reserver.enabled }
+    @discardableResult func setReserveEnabled(_ on: Bool) -> Bool {
+        if on { return reserver.enable() }
+        reserver.disable(); return true
+    }
+
+    static var finderAlwaysNewWindow: Bool { UserDefaults.standard.bool(forKey: "finderAlwaysNewWindow") }
+    var finderNewWindow: Bool { Self.finderAlwaysNewWindow }
+    func setFinderNewWindow(_ on: Bool) { UserDefaults.standard.set(on, forKey: "finderAlwaysNewWindow") }
+
+    var nowPlayingEnabled: Bool { UserDefaults.standard.bool(forKey: "showNowPlaying") }
+    func setShowNowPlaying(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "showNowPlaying")
+        layoutTray()
     }
 
     private func openNewFinderWindow() {
@@ -380,24 +387,6 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
                        "-e", "end tell"]
         try? p.run()
     }
-
-    @objc private func toggleReserve() {
-        if reserver.enabled {
-            reserver.disable()
-        } else {
-            let granted = reserver.enable()
-            if !granted {
-                let alert = NSAlert()
-                alert.messageText = "Berechtigung Bedienungshilfen nötig"
-                alert.informativeText = "Bitte aktiviere Win7Taskbar unter Systemeinstellungen → "
-                    + "Datenschutz & Sicherheit → Bedienungshilfen und wähle den Menüpunkt danach erneut."
-                alert.addButton(withTitle: "OK")
-                NSApp.activate(ignoringOtherApps: true)
-                alert.runModal()
-            }
-        }
-    }
-    @objc private func quitApp() { NSApp.terminate(nil) }
 
     private func minimizeEverything() {
         for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
@@ -411,9 +400,12 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         clock.refresh()
         battery.refresh()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.clock.refresh()
-            self?.battery.refresh()
-            self?.updateBarVisibility()
+            guard let self else { return }
+            self.clock.refresh()
+            self.battery.refresh()
+            self.updateBarVisibility()
+            self.tick += 1
+            if self.nowPlayingEnabled && self.tick % 3 == 0 { self.nowPlayingView.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
         clockTimer = timer

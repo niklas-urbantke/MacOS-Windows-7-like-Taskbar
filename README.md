@@ -28,7 +28,10 @@ Zweispalten-Startmenü, Fenstervorschau (Aero Peek), Platz-Reservierung und ein 
   - nicht gestartet → Programm starten
 - **Anheften/Lösen** per Rechtsklick.
 - **System-Tray** rechts: Akku-Anzeige, Lautstärke (Klick → Slider/Mute), Uhr (Klick → Kalender).
+- **Now-Playing-Spieler** (optional): zeigt den aktuellen Titel aus **Spotify / Apple Music**
+  mit Zurück / Play-Pause / Vor.
 - **„Desktop anzeigen"**-Streifen ganz rechts.
+- **Drag & Drop**: Taskbar-Icons lassen sich flüssig umsortieren.
 
 ### Startmenü
 - **Zweispalten-Layout** im Win7-Stil: links eine deckend weiße Programmliste, eingefasst von
@@ -53,11 +56,22 @@ Zweispalten-Startmenü, Fenstervorschau (Aero Peek), Platz-Reservierung und ein 
 - **Vollbild**: Im echten Vollbildmodus blendet sich die Leiste automatisch aus.
 - **macOS-Dock ausblenden** per Rechtsklick auf den Orb.
 
+### Einstellungen
+Rechtsklick auf den Orb → **Einstellungen…** öffnet ein zentrales Fenster mit allen Optionen:
+
+<p align="center">
+  <img src="docs/settings.png" alt="Einstellungen" width="360">
+</p>
+
+- macOS-Dock ausblenden
+- Fensterbereich reservieren (Bedienungshilfen)
+- Finder-Klick öffnet immer ein neues Fenster
+- Now-Playing-Spieler anzeigen
+
 ### Sonstiges
 - Nutzt die in macOS gewählte **Akzentfarbe** durchgängig (Highlights, Startmenü, Orb-Glow).
-- **Option**: „Finder-Klick öffnet immer ein neues Fenster" (Rechtsklick auf den Orb).
-- Reagiert auf eine Distributed Notification (`de.batix.win7taskbar.toggleStart`) — für globale
-  Hotkeys nutzbar.
+- **Globaler Hotkey**: **fn (Globe) + Control** öffnet/schließt das Startmenü.
+- Reagiert zusätzlich auf eine Distributed Notification (`de.batix.win7taskbar.toggleStart`).
 
 ---
 
@@ -93,7 +107,7 @@ Beim ersten Start fragt macOS nach Berechtigungen — bitte unter
 |---|---|
 | **Bildschirmaufnahme** | Vorschaubilder der Fenster (Aero Peek) |
 | **Bedienungshilfen** | Platz-Reservierung, minimierte Fenster, Fenster schließen/wiederherstellen |
-| **Automatisierung** (Finder/System Events) | Energie-Aktionen, „neues Finder-Fenster" |
+| **Automatisierung** (Finder/System Events/Spotify/Music) | Energie-Aktionen, „neues Finder-Fenster", Now-Playing-Steuerung |
 
 ---
 
@@ -124,6 +138,9 @@ Sources/Win7Taskbar/
   WindowPreviewController.swift  Vorschau-Panel (Aero Peek)
   WindowSpaceReserver.swift   Platz-Reservierung über Bedienungshilfen
   SystemInfo.swift            Akku (IOKit) & Lautstärke
+  NowPlaying.swift            Now-Playing-Abfrage/-Steuerung (Spotify/Music)
+  NowPlayingView.swift        Now-Playing-Widget in der Taskleiste
+  SettingsWindow.swift        Zentrales Einstellfenster
   DockHelper.swift            Dock ausblenden/einblenden
 ```
 
