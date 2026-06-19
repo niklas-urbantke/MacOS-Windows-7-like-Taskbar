@@ -2,15 +2,31 @@ import AppKit
 
 /// Central place for the Windows-7-ish metrics and colours so the look stays consistent.
 enum Theme {
-    // Bar — 60px tall, wide Win7 "large icon" frames.
-    static let barHeight: CGFloat = 60
-    static let orbWidth: CGFloat = 72
-    static let buttonWidth: CGFloat = 100
-    static let buttonHeight: CGFloat = 56
-    static let buttonSpacing: CGFloat = 4
-    static let iconSize: CGFloat = 56
-    static let clockWidth: CGFloat = 92
-    static let showDesktopWidth: CGFloat = 16
+    // The bar height is configurable; everything else scales relative to a reference of 60px.
+    static let referenceHeight: CGFloat = 60
+    static let minHeight: CGFloat = 40
+    static let maxHeight: CGFloat = 100
+
+    static var barHeight: CGFloat {
+        let v = UserDefaults.standard.object(forKey: "barHeight") as? Double ?? Double(referenceHeight)
+        return CGFloat(min(Double(maxHeight), max(Double(minHeight), v)))
+    }
+    static var scale: CGFloat { barHeight / referenceHeight }
+    /// Scale a base measurement (designed at the reference height) to the current height.
+    static func s(_ base: CGFloat) -> CGFloat { (base * scale).rounded() }
+    /// A system font scaled to the current bar height.
+    static func font(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+        NSFont.systemFont(ofSize: size * scale, weight: weight)
+    }
+
+    // Bar metrics (base values at the reference height), scaled.
+    static var orbWidth: CGFloat { s(72) }
+    static var buttonWidth: CGFloat { s(100) }
+    static var buttonHeight: CGFloat { s(56) }
+    static var buttonSpacing: CGFloat { s(4) }
+    static var iconSize: CGFloat { s(56) }
+    static var clockWidth: CGFloat { s(92) }
+    static var showDesktopWidth: CGFloat { s(16) }
 
     // Aero glass colours (drawn on top of a dark NSVisualEffectView).
     static let glassTop = NSColor(calibratedWhite: 0.30, alpha: 0.55)
@@ -30,12 +46,12 @@ enum Theme {
     static let orbTop = NSColor(calibratedRed: 0.45, green: 0.74, blue: 1.0, alpha: 1.0)
     static let orbBottom = NSColor(calibratedRed: 0.06, green: 0.30, blue: 0.62, alpha: 1.0)
 
-    // System tray (right side).
-    static let batteryWidth: CGFloat = 56
-    static let volumeWidth: CGFloat = 30
-    static let nowPlayingWidth: CGFloat = 210
-    static let wifiWidth: CGFloat = 30
-    static let monitorWidth: CGFloat = 80
+    // System tray (right side), scaled.
+    static var batteryWidth: CGFloat { s(56) }
+    static var volumeWidth: CGFloat { s(30) }
+    static var nowPlayingWidth: CGFloat { s(210) }
+    static var wifiWidth: CGFloat { s(30) }
+    static var monitorWidth: CGFloat { s(80) }
 
     // macOS accent colour the user picked in System Settings, with brightness variants.
     static var accent: NSColor { NSColor.controlAccentColor }

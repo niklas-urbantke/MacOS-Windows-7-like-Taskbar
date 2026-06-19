@@ -489,6 +489,22 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         updateWindowCounts()
     }
 
+    // Leistenhöhe (px) — alles andere skaliert proportional mit.
+    var barHeightValue: CGFloat { Theme.barHeight }
+    var minBarHeight: CGFloat { Theme.minHeight }
+    var maxBarHeight: CGFloat { Theme.maxHeight }
+    func setBarHeight(_ h: CGFloat) {
+        UserDefaults.standard.set(Double(h), forKey: "barHeight")
+        applyBarHeight()
+    }
+    private func applyBarHeight() {
+        let f = NSRect(x: screen.frame.minX, y: screen.frame.minY,
+                       width: screen.frame.width, height: Theme.barHeight)
+        window.setFrame(f, display: true)
+        orb.frame = NSRect(x: 0, y: 0, width: Theme.orbWidth, height: Theme.barHeight)
+        layoutTray()   // repositions tray + buttons at the new scale
+    }
+
     // Icon-Rahmen über volle Höhe.
     var fullHeightIcons: Bool { UserDefaults.standard.bool(forKey: "fullHeightIcons") }
     func setFullHeightIcons(_ on: Bool) {
@@ -754,20 +770,20 @@ private final class ClockView: NSView {
         let style = NSMutableParagraphStyle()
         style.alignment = .center
         let timeAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+            .font: Theme.font(14, weight: .medium),
             .foregroundColor: NSColor.white,
             .paragraphStyle: style,
         ]
         let dateAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14, weight: .medium),   // same size as the time
+            .font: Theme.font(14, weight: .medium),   // same size as the time
             .foregroundColor: NSColor(calibratedWhite: 0.92, alpha: 1),
             .paragraphStyle: style,
         ]
         let timeStr = NSAttributedString(string: time, attributes: timeAttrs)
         let dateStr = NSAttributedString(string: date, attributes: dateAttrs)
         let w = bounds.width
-        timeStr.draw(in: NSRect(x: 0, y: bounds.midY + 2, width: w, height: 19))
-        dateStr.draw(in: NSRect(x: 0, y: bounds.midY - 19, width: w, height: 19))
+        timeStr.draw(in: NSRect(x: 0, y: bounds.midY + Theme.s(2), width: w, height: Theme.s(19)))
+        dateStr.draw(in: NSRect(x: 0, y: bounds.midY - Theme.s(19), width: w, height: Theme.s(19)))
     }
 }
 
@@ -817,7 +833,7 @@ private final class BatteryView: NSView {
         // Percentage text.
         let style = NSMutableParagraphStyle(); style.alignment = .center
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .font: Theme.font(12, weight: .medium),
             .foregroundColor: NSColor.white, .paragraphStyle: style,
         ]
         let s = NSAttributedString(string: "\(info.percent)%", attributes: attrs)
@@ -840,7 +856,7 @@ private final class BatteryView: NSView {
         NSRect(x: bx + 2, y: by + 2, width: (bodyW - 4) * level, height: bodyH - 4).fill()
         if info.charging {
             let bolt = NSAttributedString(string: "⚡︎", attributes: [
-                .font: NSFont.systemFont(ofSize: 9), .foregroundColor: NSColor.white])
+                .font: Theme.font(9), .foregroundColor: NSColor.white])
             bolt.draw(at: NSPoint(x: bx + bodyW / 2 - 4, y: by + 1))
         }
     }
@@ -870,7 +886,7 @@ private final class TrayIconButton: NSView {
             Theme.accent(brightness: 1.2, alpha: 0.22).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 8), xRadius: 4, yRadius: 4).fill()
         }
-        let cfg = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+        let cfg = NSImage.SymbolConfiguration(pointSize: 16 * Theme.scale, weight: .regular)
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg) {
             let tinted = NSImage(size: img.size, flipped: false) { rect in

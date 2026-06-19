@@ -19,6 +19,8 @@ final class SettingsWindowController: NSObject {
     private var orbs: [(label: String, file: String)] = []
     private let menuStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let menuStyles: [(label: String, value: String)] = [("Akzentfarbe", "accent"), ("Taskbar (Aero)", "aero")]
+    private let heightSlider = NSSlider(frame: .zero)
+    private let heightLabel = NSTextField(labelWithString: "")
 
     func show() {
         if window == nil { build() }
@@ -57,6 +59,16 @@ final class SettingsWindowController: NSObject {
         styleRow.orientation = .horizontal
         styleRow.spacing = 8
 
+        // Bar height.
+        heightSlider.isContinuous = false   // apply on release (relayout is heavy)
+        heightSlider.target = self
+        heightSlider.action = #selector(heightChanged)
+        heightSlider.translatesAutoresizingMaskIntoConstraints = false
+        heightSlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        let heightRow = NSStackView(views: [NSTextField(labelWithString: "Leistenhöhe:"), heightSlider, heightLabel])
+        heightRow.orientation = .horizontal
+        heightRow.spacing = 8
+
         for box in [dockBox, reserveBox, finderBox, finderDesktopBox, nowPlayingBox,
                     wifiBox, monitorBox, autostartBox, fullHeightBox] {
             box.target = self
@@ -67,7 +79,7 @@ final class SettingsWindowController: NSObject {
         let tabView = NSTabView()
         tabView.translatesAutoresizingMaskIntoConstraints = false
         tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox]))
-        tabView.addTabViewItem(makeTab("Darstellung", [orbRow, styleRow, fullHeightBox]))
+        tabView.addTabViewItem(makeTab("Darstellung", [orbRow, styleRow, heightRow, fullHeightBox]))
         tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox]))
         tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox]))
 
@@ -126,6 +138,16 @@ final class SettingsWindowController: NSObject {
         if let idx = menuStyles.firstIndex(where: { $0.value == c.menuStyle }) {
             menuStylePopup.selectItem(at: idx)
         }
+        heightSlider.minValue = Double(c.minBarHeight)
+        heightSlider.maxValue = Double(c.maxBarHeight)
+        heightSlider.doubleValue = Double(c.barHeightValue)
+        heightLabel.stringValue = "\(Int(c.barHeightValue)) px"
+    }
+
+    @objc private func heightChanged() {
+        let v = heightSlider.doubleValue.rounded()
+        controller?.setBarHeight(CGFloat(v))
+        heightLabel.stringValue = "\(Int(v)) px"
     }
 
     @objc private func orbChanged() {

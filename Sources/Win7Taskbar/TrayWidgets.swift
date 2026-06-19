@@ -33,7 +33,7 @@ final class WifiView: NSView {
             NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 8), xRadius: 4, yRadius: 4).fill()
         }
         let name = connected ? "wifi" : "wifi.slash"
-        let cfg = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        let cfg = NSImage.SymbolConfiguration(pointSize: 15 * Theme.scale, weight: .regular)
         guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg) else { return }
         let tinted = NSImage(size: img.size, flipped: false) { rect in
@@ -62,21 +62,21 @@ final class HardwareMonitorView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium),
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10.5 * Theme.scale, weight: .medium),
             .foregroundColor: NSColor.white,
         ]
         NSAttributedString(string: "CPU \(cpu)%", attributes: attrs)
-            .draw(at: NSPoint(x: 6, y: bounds.midY + 1))
+            .draw(at: NSPoint(x: Theme.s(6), y: bounds.midY + Theme.s(1)))
         NSAttributedString(string: "RAM \(ram)%", attributes: attrs)
-            .draw(at: NSPoint(x: 6, y: bounds.midY - 15))
+            .draw(at: NSPoint(x: Theme.s(6), y: bounds.midY - Theme.s(15)))
 
         // Tiny bars on the right.
-        drawBar(value: cpu, y: bounds.midY + 3)
-        drawBar(value: ram, y: bounds.midY - 11)
+        drawBar(value: cpu, y: bounds.midY + Theme.s(3))
+        drawBar(value: ram, y: bounds.midY - Theme.s(11))
     }
 
     private func drawBar(value: Int, y: CGFloat) {
-        let track = NSRect(x: bounds.minX + 54, y: y, width: 18, height: 6)
+        let track = NSRect(x: bounds.minX + Theme.s(54), y: y, width: Theme.s(18), height: Theme.s(6))
         NSColor(calibratedWhite: 1, alpha: 0.2).setFill()
         NSBezierPath(roundedRect: track, xRadius: 2, yRadius: 2).fill()
         let fillW = track.width * CGFloat(value) / 100

@@ -20,11 +20,12 @@ final class NowPlayingView: NSView {
     override func layout() { super.layout(); layoutButtons() }
 
     private func layoutButtons() {
-        let s: CGFloat = 22
+        let s = Theme.s(22)
+        let gap = Theme.s(4)
         let y = (bounds.height - s) / 2
-        nextButton.frame = NSRect(x: bounds.maxX - s - 6, y: y, width: s, height: s)
-        playButton.frame = NSRect(x: nextButton.frame.minX - s - 4, y: y, width: s, height: s)
-        prevButton.frame = NSRect(x: playButton.frame.minX - s - 4, y: y, width: s, height: s)
+        nextButton.frame = NSRect(x: bounds.maxX - s - Theme.s(6), y: y, width: s, height: s)
+        playButton.frame = NSRect(x: nextButton.frame.minX - s - gap, y: y, width: s, height: s)
+        prevButton.frame = NSRect(x: playButton.frame.minX - s - gap, y: y, width: s, height: s)
     }
 
     private var controlsLeft: CGFloat { prevButton.frame.minX }
@@ -82,35 +83,37 @@ final class NowPlayingView: NSView {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        let pad = Theme.s(8)
         guard let info else {
             let s = NSAttributedString(string: "♪ —", attributes: [
-                .font: NSFont.systemFont(ofSize: 11),
+                .font: Theme.font(11),
                 .foregroundColor: NSColor(calibratedWhite: 0.75, alpha: 1)])
-            s.draw(at: NSPoint(x: 8, y: (bounds.height - s.size().height) / 2))
+            s.draw(at: NSPoint(x: pad, y: (bounds.height - s.size().height) / 2))
             return
         }
 
         let style = NSMutableParagraphStyle(); style.lineBreakMode = .byTruncatingTail
         let titleAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11.5, weight: .medium),
+            .font: Theme.font(11.5, weight: .medium),
             .foregroundColor: NSColor.white, .paragraphStyle: style]
         let artistAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10),
+            .font: Theme.font(10),
             .foregroundColor: NSColor(calibratedWhite: 0.85, alpha: 1), .paragraphStyle: style]
 
-        let textW = controlsLeft - 12
+        let textW = controlsLeft - pad - Theme.s(4)
         guard textW > 30 else { return }
         NSAttributedString(string: info.title, attributes: titleAttrs)
-            .draw(in: NSRect(x: 8, y: bounds.midY + 3, width: textW, height: 15))
+            .draw(in: NSRect(x: pad, y: bounds.midY + Theme.s(3), width: textW, height: Theme.s(15)))
         NSAttributedString(string: info.artist, attributes: artistAttrs)
-            .draw(in: NSRect(x: 8, y: bounds.midY - 12, width: textW, height: 13))
+            .draw(in: NSRect(x: pad, y: bounds.midY - Theme.s(12), width: textW, height: Theme.s(13)))
 
         // Progress bar.
-        let track = NSRect(x: 8, y: 7, width: textW, height: 2)
+        let by = Theme.s(7)
+        let track = NSRect(x: pad, y: by, width: textW, height: Theme.s(2))
         NSColor(calibratedWhite: 1, alpha: 0.25).setFill()
         NSBezierPath(roundedRect: track, xRadius: 1, yRadius: 1).fill()
         Theme.accent(brightness: 1.3).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 8, y: 7, width: textW * CGFloat(info.fraction), height: 2),
+        NSBezierPath(roundedRect: NSRect(x: pad, y: by, width: textW * CGFloat(info.fraction), height: Theme.s(2)),
                      xRadius: 1, yRadius: 1).fill()
     }
 
@@ -127,7 +130,7 @@ final class NowPlayingView: NSView {
     }
 
     private static func symbol(_ name: String) -> NSImage? {
-        let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        let cfg = NSImage.SymbolConfiguration(pointSize: 13 * Theme.scale, weight: .regular)
         return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg)
     }
