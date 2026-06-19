@@ -22,6 +22,7 @@ final class SettingsWindowController: NSObject {
 
     func show() {
         if window == nil { build() }
+        reloadOrbPopup()        // pick up orbs added/dropped since last time
         syncFromController()
         window?.center()
         NSApp.activate(ignoringOtherApps: true)

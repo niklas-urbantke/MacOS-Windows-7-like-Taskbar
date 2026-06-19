@@ -89,11 +89,20 @@ final class StartOrbButton: NSControl {
     /// orb.png is one image stacked vertically in three states:
     /// top = normal, middle = hover, bottom = pressed. We crossfade between them.
     private func drawImageOrb(_ img: NSImage, in rect: NSRect) {
-        // Three layers stacked normal → hover → pressed; each cross-fades over the one below,
-        // so the orb glides smoothly through the states in both directions.
-        drawThird(img, 0, in: rect, alpha: 1)                  // normal (base)
-        if glow > 0.001 { drawThird(img, 1, in: rect, alpha: glow) }    // hover fades in over normal
-        if press > 0.001 { drawThird(img, 2, in: rect, alpha: press) }  // pressed fades in over hover
+        // A tall image (height ≈ 3×width) holds the three states stacked; otherwise it's a
+        // single-image orb we just draw as-is for every state.
+        let stacked = img.size.width > 0 && img.size.height >= img.size.width * 2.5
+        if stacked {
+            drawThird(img, 0, in: rect, alpha: 1)                  // normal (base)
+            if glow > 0.001 { drawThird(img, 1, in: rect, alpha: glow) }    // hover fades in
+            if press > 0.001 { drawThird(img, 2, in: rect, alpha: press) }  // pressed fades in
+        } else {
+            img.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            if glow > 0.01 {   // subtle hover brighten for single-image orbs
+                NSColor(calibratedWhite: 1, alpha: 0.12 * glow).setFill()
+                NSBezierPath(ovalIn: rect).fill()
+            }
+        }
     }
 
     private func drawThird(_ img: NSImage, _ index: Int, in rect: NSRect, alpha: CGFloat) {
