@@ -9,7 +9,7 @@ enum Theme {
     static let buttonHeight: CGFloat = 56
     static let buttonSpacing: CGFloat = 4
     static let iconSize: CGFloat = 56
-    static let clockWidth: CGFloat = 100
+    static let clockWidth: CGFloat = 92
     static let showDesktopWidth: CGFloat = 16
 
     // Aero glass colours (drawn on top of a dark NSVisualEffectView).

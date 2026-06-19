@@ -121,31 +121,36 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     /// Positions the tray (right side) and the now-playing widget, then re-lays out the buttons.
     private func layoutTray() {
         let h = Theme.barHeight
+        let gap: CGFloat = 10          // uniform spacing between tray elements
         var x = glass.bounds.width
 
-        // From the edge inward: show-desktop | clock | volume | battery | now-playing.
-        x -= Theme.showDesktopWidth; showDesktop.frame = NSRect(x: x, y: 0, width: Theme.showDesktopWidth, height: h)
-        x -= Theme.clockWidth;       clock.frame       = NSRect(x: x, y: 0, width: Theme.clockWidth, height: h)
-        x -= Theme.volumeWidth;      volume.frame      = NSRect(x: x, y: 0, width: Theme.volumeWidth, height: h)
-        if hasBattery { x -= Theme.batteryWidth; battery.frame = NSRect(x: x, y: 0, width: Theme.batteryWidth, height: h) }
+        // Show-desktop sliver sits at the very edge; every other element gets a uniform gap.
+        x -= Theme.showDesktopWidth
+        showDesktop.frame = NSRect(x: x, y: 0, width: Theme.showDesktopWidth, height: h)
+
+        func slot(_ width: CGFloat) -> NSRect {
+            x -= gap + width
+            return NSRect(x: x, y: 0, width: width, height: h)
+        }
+
+        clock.frame = slot(Theme.clockWidth)
+        volume.frame = slot(Theme.volumeWidth)
+        if hasBattery { battery.frame = slot(Theme.batteryWidth) }
 
         if wifiEnabled {
-            x -= Theme.wifiWidth
-            wifiView.frame = NSRect(x: x, y: 0, width: Theme.wifiWidth, height: h)
+            wifiView.frame = slot(Theme.wifiWidth)
             if wifiView.superview == nil { glass.addSubview(wifiView) }
             wifiView.refresh()
         } else { wifiView.removeFromSuperview() }
 
         if monitorEnabled {
-            x -= Theme.monitorWidth
-            monitorView.frame = NSRect(x: x, y: 0, width: Theme.monitorWidth, height: h)
+            monitorView.frame = slot(Theme.monitorWidth)
             if monitorView.superview == nil { glass.addSubview(monitorView) }
             monitorView.refresh()
         } else { monitorView.removeFromSuperview() }
 
         if nowPlayingEnabled {
-            x -= Theme.nowPlayingWidth
-            nowPlayingView.frame = NSRect(x: x, y: 0, width: Theme.nowPlayingWidth, height: h)
+            nowPlayingView.frame = slot(Theme.nowPlayingWidth)
             if nowPlayingView.superview == nil { glass.addSubview(nowPlayingView) }
             nowPlayingView.refresh()
         } else {
@@ -725,7 +730,7 @@ private final class ClockView: NSView {
             .paragraphStyle: style,
         ]
         let dateAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11),
+            .font: NSFont.systemFont(ofSize: 14, weight: .medium),   // same size as the time
             .foregroundColor: NSColor(calibratedWhite: 0.92, alpha: 1),
             .paragraphStyle: style,
         ]
@@ -733,7 +738,7 @@ private final class ClockView: NSView {
         let dateStr = NSAttributedString(string: date, attributes: dateAttrs)
         let w = bounds.width
         timeStr.draw(in: NSRect(x: 0, y: bounds.midY + 2, width: w, height: 19))
-        dateStr.draw(in: NSRect(x: 0, y: bounds.midY - 17, width: w, height: 15))
+        dateStr.draw(in: NSRect(x: 0, y: bounds.midY - 19, width: w, height: 19))
     }
 }
 
