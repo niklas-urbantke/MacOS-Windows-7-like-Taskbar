@@ -6,12 +6,14 @@ import AppKit
 final class StartOrbButton: NSControl {
     var onRightClick: (() -> Void)?
 
+    /// Third orb state shows while the Start menu is open.
+    var menuOpen = false { didSet { if menuOpen != oldValue { startAnim() } } }
+
     private var hovering = false
-    private var pressed = false
 
     // Animated state, eased each tick toward its target.
-    private var glow: CGFloat = 0          // 0…1 hover glow
-    private var press: CGFloat = 0          // 0…1 pressed depth
+    private var glow: CGFloat = 0          // 0…1 hover (middle state)
+    private var press: CGFloat = 0          // 0…1 menu-open (third state)
     private var phase: CGFloat = 0          // free-running phase for the pulse
     private var anim: Timer?
 
@@ -38,10 +40,8 @@ final class StartOrbButton: NSControl {
     override func mouseExited(with event: NSEvent) { hovering = false; startAnim() }
 
     override func mouseDown(with event: NSEvent) {
-        pressed = true; startAnim()
         if let action = action { NSApp.sendAction(action, to: target, from: self) }
     }
-    override func mouseUp(with event: NSEvent) { pressed = false; startAnim() }
     override func rightMouseDown(with event: NSEvent) { onRightClick?() }
 
     // MARK: - Animation loop
@@ -54,16 +54,16 @@ final class StartOrbButton: NSControl {
     }
 
     private func tick() {
-        let glowTarget: CGFloat = (hovering || pressed) ? 1 : 0
+        let glowTarget: CGFloat = hovering ? 1 : 0          // middle state on hover
         glow += (glowTarget - glow) * 0.12
-        let pressTarget: CGFloat = pressed ? 1 : 0
-        press += (pressTarget - press) * 0.16
+        let openTarget: CGFloat = menuOpen ? 1 : 0          // third state while menu open
+        press += (openTarget - press) * 0.16
         if hovering { phase += 0.08 }
 
         needsDisplay = true
 
         // Stop the timer once everything has settled (and we're not pulsing).
-        if !hovering && !pressed && glow < 0.01 && press < 0.01 {
+        if !hovering && !menuOpen && glow < 0.01 && press < 0.01 {
             glow = 0; press = 0
             anim?.invalidate(); anim = nil
         }
@@ -75,7 +75,7 @@ final class StartOrbButton: NSControl {
         // The orb art sits inside transparent padding, so we crop to the content and let it
         // fill the bar height (overflowing slightly into the clipped glow margin).
         let base = orbImage != nil ? bounds.height * 1.18 - 3 : min(bounds.width - 4, bounds.height - 2)
-        let d = base * (1 - 0.05 * press)                 // depress slightly when pressed
+        let d = base                                      // constant size (state shown via image)
         let rect = NSRect(x: (bounds.width - d) / 2, y: (bounds.height - d) / 2, width: d, height: d)
 
         if let img = orbImage {
@@ -144,9 +144,10 @@ final class StartOrbButton: NSControl {
         path.stroke()
 
         // Blue glass sphere.
-        let topB = pressed ? Theme.orbBottom : NSColor(calibratedRed: 0.52, green: 0.80, blue: 1.0, alpha: 1)
+        let open = press > 0.5
+        let topB = open ? Theme.orbBottom : NSColor(calibratedRed: 0.52, green: 0.80, blue: 1.0, alpha: 1)
         let midB = NSColor(calibratedRed: 0.13, green: 0.48, blue: 0.85, alpha: 1)
-        let botB = pressed ? NSColor(calibratedRed: 0.30, green: 0.62, blue: 0.95, alpha: 1) : Theme.orbBottom
+        let botB = open ? NSColor(calibratedRed: 0.30, green: 0.62, blue: 0.95, alpha: 1) : Theme.orbBottom
         let sphere = NSGradient(colors: [topB, midB, botB], atLocations: [0, 0.5, 1], colorSpace: .sRGB)
         sphere?.draw(in: path, angle: -90)
 

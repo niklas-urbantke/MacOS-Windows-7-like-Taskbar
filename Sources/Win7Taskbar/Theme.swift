@@ -8,7 +8,7 @@ enum Theme {
     static let buttonWidth: CGFloat = 100
     static let buttonHeight: CGFloat = 56
     static let buttonSpacing: CGFloat = 4
-    static let iconSize: CGFloat = 48
+    static let iconSize: CGFloat = 52
     static let clockWidth: CGFloat = 100
     static let showDesktopWidth: CGFloat = 16
 

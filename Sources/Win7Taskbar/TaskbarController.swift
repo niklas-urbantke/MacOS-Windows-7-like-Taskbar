@@ -55,6 +55,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         orb.target = self
         orb.action = #selector(toggleStart)
         orb.onRightClick = { [weak self] in self?.showOrbMenu() }
+        startMenu.onVisibilityChanged = { [weak self] open in self?.orb.menuOpen = open }
         showDesktop.onClick = { [weak self] in self?.minimizeEverything() }
         clock.onClick = { [weak self] in self?.showCalendar() }
         volume.onClick = { [weak self] in self?.showVolume() }

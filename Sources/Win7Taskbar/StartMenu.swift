@@ -15,6 +15,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private var alleButton: LeftRowButton?
     private var fileSearchToken = 0
     private var firstResult: AppEntry?
+    var onVisibilityChanged: ((Bool) -> Void)?
     weak var taskbarController: TaskbarController?
 
     private let W = Theme.startWidth
@@ -324,10 +325,12 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
             }
         }
         window.makeFirstResponder(searchField)
+        onVisibilityChanged?(true)
     }
 
     func hide() {
         guard window.isVisible else { return }
+        onVisibilityChanged?(false)
         if reduceMotion {
             window.orderOut(nil)
             return
