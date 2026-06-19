@@ -44,8 +44,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         self.screen = screen
         let frame = NSRect(x: screen.frame.minX, y: screen.frame.minY,
                            width: screen.frame.width, height: Theme.barHeight)
-        window = NSWindow(contentRect: frame, styleMask: [.borderless],
-                          backing: .buffered, defer: false)
+        // Non-activating panel: clicks are delivered immediately without first pulling the
+        // bar into focus, so a single click works even when another app is active.
+        let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = false
+        window = panel
         super.init()
 
         configureWindow(frame: frame)
@@ -59,6 +64,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         showDesktop.onClick = { [weak self] in self?.minimizeEverything() }
         clock.onClick = { [weak self] in self?.showCalendar() }
         volume.onClick = { [weak self] in self?.showVolume() }
+        glass.onDropFiles = { [weak self] urls in self?.pinDroppedFiles(urls) }
 
         registerObservers()
         installHotkey()
@@ -300,6 +306,20 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         } else if let url = item.url {
             NSWorkspace.shared.openApplication(at: url, configuration: .init())
         }
+    }
+
+    /// Pin apps dropped onto the bar (drag & drop).
+    func pinDroppedFiles(_ urls: [URL]) {
+        for url in urls where url.pathExtension.lowercased() == "app" {
+            if let id = Bundle(url: url)?.bundleIdentifier { pinToTaskbar(bundleID: id) }
+        }
+    }
+
+    /// Pin an app (by bundle id) to the taskbar — used from the Start menu.
+    func pinToTaskbar(bundleID: String?) {
+        guard let id = bundleID else { return }
+        var keys = PinStore.load()
+        if !keys.contains(id) { keys.append(id); PinStore.save(keys); rebuildItems() }
     }
 
     func taskbarButtonToggledPin(_ item: TaskbarItem) {
@@ -708,6 +728,7 @@ private final class ClockView: NSView {
     required init?(coder: NSCoder) { fatalError() }
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     func refresh() {
@@ -759,6 +780,7 @@ private final class ShowDesktopButton: NSView {
 
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -832,6 +854,7 @@ private final class TrayIconButton: NSView {
     required init?(coder: NSCoder) { fatalError() }
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func draw(_ dirtyRect: NSRect) {

@@ -34,6 +34,9 @@ final class TaskbarButton: NSControl {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    // Deliver the very first click even when our window isn't active (no double-tap).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseEntered(with event: NSEvent) {
         hovering = true; needsDisplay = true
         guard item.isRunning else { return }

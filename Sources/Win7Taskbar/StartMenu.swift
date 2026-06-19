@@ -214,6 +214,10 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
                                onTogglePin: { [weak self] e in
                                    StartPins.toggle(e.bundleID)
                                    self?.reloadList(filter: self?.searchField.stringValue ?? "")
+                               },
+                               onPinTaskbar: file ? nil : { [weak self] e in
+                                   self?.taskbarController?.pinToTaskbar(bundleID: e.bundleID)
+                                   self?.hide()
                                })
         if let cached = StartMenuController.iconCache[app.url.path] { row.iconImage = cached }
         return row
@@ -760,13 +764,16 @@ private final class AppRowButton: NSControl {
     private let pinned: Bool
     private let onOpen: (AppEntry) -> Void
     private let onTogglePin: (AppEntry) -> Void
+    private let onPinTaskbar: ((AppEntry) -> Void)?
     private var hovering = false
     var iconImage: NSImage?
 
     init(entry: AppEntry, pinned: Bool,
          onOpen: @escaping (AppEntry) -> Void,
-         onTogglePin: @escaping (AppEntry) -> Void) {
-        self.entry = entry; self.pinned = pinned; self.onOpen = onOpen; self.onTogglePin = onTogglePin
+         onTogglePin: @escaping (AppEntry) -> Void,
+         onPinTaskbar: ((AppEntry) -> Void)? = nil) {
+        self.entry = entry; self.pinned = pinned; self.onOpen = onOpen
+        self.onTogglePin = onTogglePin; self.onPinTaskbar = onPinTaskbar
         super.init(frame: NSRect(x: 0, y: 0, width: Theme.startLeftWidth - 28, height: 50))
         let a = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
         addTrackingArea(a)
@@ -781,13 +788,48 @@ private final class AppRowButton: NSControl {
 
     override func rightMouseDown(with event: NSEvent) {
         let menu = NSMenu()
-        let title = pinned ? "Vom Startmenü lösen" : "An Startmenü anheften"
-        let item = NSMenuItem(title: title, action: #selector(togglePin), keyEquivalent: "")
-        item.target = self
-        menu.addItem(item)
+        let isApp = entry.bundleID != nil
+
+        if isApp {
+            let pinItem = NSMenuItem(title: pinned ? "Vom Startmenü lösen" : "An Startmenü anheften",
+                                     action: #selector(togglePin), keyEquivalent: "")
+            pinItem.target = self
+            menu.addItem(pinItem)
+
+            if onPinTaskbar != nil {
+                let tb = NSMenuItem(title: "An Taskleiste anheften", action: #selector(pinTaskbarAction), keyEquivalent: "")
+                tb.target = self
+                menu.addItem(tb)
+            }
+        }
+
+        let shortcut = NSMenuItem(title: "Desktopverknüpfung erstellen", action: #selector(shortcutAction), keyEquivalent: "")
+        shortcut.target = self
+        menu.addItem(shortcut)
+
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
     @objc private func togglePin() { onTogglePin(entry) }
+    @objc private func pinTaskbarAction() { onPinTaskbar?(entry) }
+    @objc private func shortcutAction() { AppRowButton.createDesktopShortcut(for: entry) }
+
+    /// Create a Finder alias for the app/file on the Desktop.
+    private static func createDesktopShortcut(for entry: AppEntry) {
+        guard let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        else { return }
+        var dest = desktop.appendingPathComponent(entry.name)
+        var n = 2
+        while FileManager.default.fileExists(atPath: dest.path) {
+            dest = desktop.appendingPathComponent("\(entry.name) \(n)"); n += 1
+        }
+        do {
+            let data = try entry.url.bookmarkData(options: .suitableForBookmarkFile,
+                                                  includingResourceValuesForKeys: nil, relativeTo: nil)
+            try URL.writeBookmarkData(data, to: dest)
+        } catch {
+            NSLog("Desktopverknüpfung fehlgeschlagen: \(error)")
+        }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         if hovering {

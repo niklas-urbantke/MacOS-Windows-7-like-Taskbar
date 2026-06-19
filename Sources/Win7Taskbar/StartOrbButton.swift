@@ -34,6 +34,8 @@ final class StartOrbButton: NSControl {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     // MARK: - Interaction
 
     override func mouseEntered(with event: NSEvent) { hovering = true; startAnim() }
