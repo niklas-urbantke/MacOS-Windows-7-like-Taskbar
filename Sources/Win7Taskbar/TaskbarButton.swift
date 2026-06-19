@@ -113,7 +113,9 @@ final class TaskbarButton: NSControl {
 
         if item.isRunning {
             menu.addItem(.separator())
-            let quit = NSMenuItem(title: "Fenster schließen / Beenden",
+            // Finder must never be quit (the desktop would vanish) — only close its windows.
+            let isFinder = item.key == "com.apple.finder"
+            let quit = NSMenuItem(title: isFinder ? "Alle Fenster schließen" : "Fenster schließen / Beenden",
                                   action: #selector(quitAction), keyEquivalent: "")
             quit.target = self
             menu.addItem(quit)
@@ -173,15 +175,17 @@ final class TaskbarButton: NSControl {
         if item.windowCount > 1 {
             let extra = min(item.windowCount - 1, 3)
             let spacing: CGFloat = extra <= 1 ? 6 : (extra == 2 ? 5 : 4)
-            NSColor(calibratedWhite: 1, alpha: 0.5).setStroke()
+            NSGraphicsContext.current?.saveGraphicsState()
+            path.addClip()   // keep the nested frames inside the button (left stays clean)
+            NSColor(calibratedWhite: 1, alpha: 0.32).setStroke()
             for i in 1...extra {
-                let x = inset.maxX - CGFloat(i) * spacing
-                let line = NSBezierPath()
-                line.move(to: NSPoint(x: x, y: inset.minY + radius))
-                line.line(to: NSPoint(x: x, y: inset.maxY - radius))
-                line.lineWidth = 1
-                line.stroke()
+                let off = CGFloat(i) * spacing
+                let r = NSRect(x: inset.minX - off, y: inset.minY, width: inset.width, height: inset.height)
+                let p = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+                p.lineWidth = 1
+                p.stroke()
             }
+            NSGraphicsContext.current?.restoreGraphicsState()
         }
     }
 

@@ -334,7 +334,15 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     }
 
     func taskbarButtonQuit(_ item: TaskbarItem) {
-        item.runningApp?.terminate()
+        if item.runningApp?.bundleIdentifier == "com.apple.finder" {
+            // Never quit Finder — just close all its windows (keeps the desktop alive).
+            let p = Process()
+            p.launchPath = "/usr/bin/osascript"
+            p.arguments = ["-e", "tell application \"Finder\" to close every window"]
+            try? p.run()
+        } else {
+            item.runningApp?.terminate()
+        }
     }
 
     func taskbarButtonMiddleClicked(_ item: TaskbarItem) {
