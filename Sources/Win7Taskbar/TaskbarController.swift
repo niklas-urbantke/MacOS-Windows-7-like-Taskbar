@@ -22,6 +22,15 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private var hotkeyMonitors: [Any] = []
     private var hotkeyArmed = true
 
+    // Button layout geometry + drag state.
+    private var buttonStartX: CGFloat = 0
+    private var buttonPitch: CGFloat = 0
+    private var buttonW: CGFloat = 0
+    private var buttonY: CGFloat = 0
+    private weak var draggingButton: TaskbarButton?
+    private var dragOffsetX: CGFloat = 0
+    private var orderedKeys: [String] = []
+
     private let calendarPopover = NSPopover()
     private let volumePopover = NSPopover()
 
@@ -155,15 +164,25 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
                                         url: app.bundleURL, runningApp: app, pinned: false))
         }
 
-        items = newItems
+        // Preserve the user's custom (drag) order; append any new items at the end.
+        var ordered: [TaskbarItem] = []
+        for key in orderedKeys {
+            if let item = newItems.first(where: { $0.key == key }) { ordered.append(item) }
+        }
+        for item in newItems where !orderedKeys.contains(item.key) { ordered.append(item) }
+
+        items = ordered
+        orderedKeys = items.map { $0.key }
         layoutButtons()
     }
+
+    private func slotX(_ i: Int) -> CGFloat { buttonStartX + CGFloat(i) * buttonPitch }
 
     private func layoutButtons() {
         buttons.forEach { $0.removeFromSuperview() }
         buttons.removeAll()
 
-        let startX = Theme.orbWidth + 14   // 10px mehr Abstand zwischen Orb und erstem Icon
+        let startX = Theme.orbWidth + 14   // Abstand zwischen Orb und erstem Icon
         let endX = trayLeftX - 6
         let available = max(0, endX - startX)
         guard !items.isEmpty, available > 0 else { return }
@@ -171,15 +190,15 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         // Shrink button width when the bar is full, Win7-style.
         let ideal = Theme.buttonWidth + Theme.buttonSpacing
         let count = CGFloat(items.count)
-        let perButton = min(ideal, available / count)
-        let width = perButton - Theme.buttonSpacing
-        let y = (Theme.barHeight - Theme.buttonHeight) / 2
+        buttonStartX = startX
+        buttonPitch = min(ideal, available / count)
+        buttonW = buttonPitch - Theme.buttonSpacing
+        buttonY = (Theme.barHeight - Theme.buttonHeight) / 2
 
         for (i, item) in items.enumerated() {
             let b = TaskbarButton(item: item)
             b.buttonDelegate = self
-            b.frame = NSRect(x: startX + CGFloat(i) * perButton, y: y,
-                             width: width, height: Theme.buttonHeight)
+            b.frame = NSRect(x: slotX(i), y: buttonY, width: buttonW, height: Theme.buttonHeight)
             glass.addSubview(b)
             buttons.append(b)
         }
@@ -242,6 +261,52 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
     func taskbarButtonHoverEnded() {
         preview.scheduleHide()
+    }
+
+    // MARK: - Drag reordering
+
+    func taskbarButtonDragBegan(_ button: TaskbarButton, atX x: CGFloat) {
+        draggingButton = button
+        dragOffsetX = x - button.frame.minX
+        preview.scheduleHide()
+        glass.addSubview(button)   // float above the others
+    }
+
+    func taskbarButtonDragged(_ button: TaskbarButton, toX x: CGFloat) {
+        guard let from = buttons.firstIndex(of: button), buttonPitch > 0 else { return }
+
+        // The dragged button follows the cursor (clamped to the row).
+        let maxX = slotX(buttons.count - 1)
+        let newX = max(buttonStartX, min(x - dragOffsetX, maxX))
+        button.frame.origin.x = newX
+
+        // Target slot from the dragged centre; shift the others out of the way (animated).
+        var to = Int((newX - buttonStartX + buttonPitch / 2) / buttonPitch)
+        to = max(0, min(buttons.count - 1, to))
+        if to != from {
+            let b = buttons.remove(at: from); buttons.insert(b, at: to)
+            let it = items.remove(at: from); items.insert(it, at: to)
+            orderedKeys = items.map { $0.key }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.16
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                for (i, bb) in buttons.enumerated() where bb !== button {
+                    bb.animator().setFrameOrigin(NSPoint(x: slotX(i), y: buttonY))
+                }
+            }
+        }
+    }
+
+    func taskbarButtonDragEnded(_ button: TaskbarButton) {
+        defer { draggingButton = nil }
+        guard let idx = buttons.firstIndex(of: button) else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.16
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            button.animator().setFrameOrigin(NSPoint(x: slotX(idx), y: buttonY))
+        }
+        // Persist the new order of pinned apps.
+        PinStore.save(items.filter { $0.pinned }.map { $0.key })
     }
 
     /// Debug hook: show the preview for the first running app's button (used for testing).
@@ -414,7 +479,10 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         }
     }
 
-    @objc private func appsChanged() { rebuildItems() }
+    @objc private func appsChanged() {
+        guard draggingButton == nil else { return }   // don't relayout mid-drag
+        rebuildItems()
+    }
 
     // MARK: - Global hotkey (fn/Globe + Control toggles the Start menu)
 

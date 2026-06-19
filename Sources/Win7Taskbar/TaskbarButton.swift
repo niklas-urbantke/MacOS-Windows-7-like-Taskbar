@@ -6,6 +6,9 @@ protocol TaskbarButtonDelegate: AnyObject {
     func taskbarButtonQuit(_ item: TaskbarItem)
     func taskbarButtonHover(_ item: TaskbarItem, button: TaskbarButton)
     func taskbarButtonHoverEnded()
+    func taskbarButtonDragBegan(_ button: TaskbarButton, atX x: CGFloat)
+    func taskbarButtonDragged(_ button: TaskbarButton, toX x: CGFloat)
+    func taskbarButtonDragEnded(_ button: TaskbarButton)
 }
 
 /// A single Win7-style taskbar button: icon + label, with running / active / hover states.
@@ -15,6 +18,8 @@ final class TaskbarButton: NSControl {
 
     private var hovering = false
     private var hoverTimer: Timer?
+    private var downX: CGFloat = 0
+    private var dragStarted = false
 
     init(item: TaskbarItem) {
         self.item = item
@@ -45,8 +50,33 @@ final class TaskbarButton: NSControl {
         buttonDelegate?.taskbarButtonHoverEnded()
     }
 
+    private func glassX(_ event: NSEvent) -> CGFloat {
+        superview?.convert(event.locationInWindow, from: nil).x ?? frame.minX
+    }
+
     override func mouseDown(with event: NSEvent) {
-        buttonDelegate?.taskbarButtonClicked(item)
+        dragStarted = false
+        hoverTimer?.invalidate(); hoverTimer = nil
+        downX = glassX(event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let gx = glassX(event)
+        if !dragStarted {
+            if abs(gx - downX) < 5 { return }       // small threshold before a drag begins
+            dragStarted = true
+            buttonDelegate?.taskbarButtonDragBegan(self, atX: downX)
+        }
+        buttonDelegate?.taskbarButtonDragged(self, toX: gx)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if dragStarted {
+            buttonDelegate?.taskbarButtonDragEnded(self)
+        } else {
+            buttonDelegate?.taskbarButtonClicked(item)
+        }
+        dragStarted = false
     }
 
     override func rightMouseDown(with event: NSEvent) {
