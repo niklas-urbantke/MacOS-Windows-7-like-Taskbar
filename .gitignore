@@ -4,3 +4,6 @@ Win7Taskbar.app/
 
 # macOS
 .DS_Store
+
+# Release-Artefakt
+*.dmg
