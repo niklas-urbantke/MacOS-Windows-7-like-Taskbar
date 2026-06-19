@@ -23,9 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controllers.forEach { $0.tearDown() }
         controllers.removeAll()
 
-        // One taskbar on the main screen. (Multi-monitor: change to NSScreen.screens.)
-        if let screen = NSScreen.main {
-            controllers.append(TaskbarController(screen: screen))
+        // Always the primary display (the one with the menu bar at origin 0,0) — not
+        // NSScreen.main, which only tracks the screen of the active window.
+        let primary = NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
+        if let primary {
+            controllers.append(TaskbarController(screen: primary))
         }
     }
 }
