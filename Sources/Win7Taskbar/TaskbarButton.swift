@@ -9,6 +9,7 @@ protocol TaskbarButtonDelegate: AnyObject {
     func taskbarButtonDragBegan(_ button: TaskbarButton, atX x: CGFloat)
     func taskbarButtonDragged(_ button: TaskbarButton, toX x: CGFloat)
     func taskbarButtonDragEnded(_ button: TaskbarButton)
+    func taskbarButtonMiddleClicked(_ item: TaskbarItem)
 }
 
 /// A single Win7-style taskbar button: icon + label, with running / active / hover states.
@@ -77,6 +78,10 @@ final class TaskbarButton: NSControl {
             buttonDelegate?.taskbarButtonClicked(item)
         }
         dragStarted = false
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        if event.buttonNumber == 2 { buttonDelegate?.taskbarButtonMiddleClicked(item) }
     }
 
     override func rightMouseDown(with event: NSEvent) {

@@ -4,7 +4,10 @@ import Foundation
 /// (macOS no longer exposes system-wide now-playing to third-party apps, so we query the
 /// supported player apps directly.)
 enum NowPlaying {
-    struct Info { let app: String; let title: String; let artist: String; let playing: Bool }
+    struct Info {
+        let app: String; let title: String; let artist: String
+        let playing: Bool; var fraction: Double
+    }
 
     private static let sep = "|||"
 
@@ -15,7 +18,7 @@ enum NowPlaying {
             if application "Spotify" is running then
                 tell application "Spotify"
                     if player state is not stopped then
-                        return "Spotify" & sep & (player state as text) & sep & (name of current track) & sep & (artist of current track)
+                        return "Spotify" & sep & (player state as text) & sep & (name of current track) & sep & (artist of current track) & sep & (player position as text) & sep & ((duration of current track) as text)
                     end if
                 end tell
             end if
@@ -24,7 +27,7 @@ enum NowPlaying {
             if application "Music" is running then
                 tell application "Music"
                     if player state is not stopped then
-                        return "Music" & sep & (player state as text) & sep & (name of current track) & sep & (artist of current track)
+                        return "Music" & sep & (player state as text) & sep & (name of current track) & sep & (artist of current track) & sep & (player position as text) & sep & ((duration of current track) as text)
                     end if
                 end tell
             end if
@@ -32,13 +35,21 @@ enum NowPlaying {
         return ""
         """
         let parts = run(script).components(separatedBy: sep)
-        guard parts.count == 4 else { return nil }
+        guard parts.count == 6 else { return nil }
+        let app = parts[0]
         let title = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
-        return Info(app: parts[0],
+
+        let pos = Double(parts[4].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")) ?? 0
+        var dur = Double(parts[5].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")) ?? 0
+        if app == "Spotify" { dur /= 1000 }   // Spotify reports duration in milliseconds
+        let fraction = dur > 0 ? max(0, min(1, pos / dur)) : 0
+
+        return Info(app: app,
                     title: title,
                     artist: parts[3].trimmingCharacters(in: .whitespacesAndNewlines),
-                    playing: parts[1].lowercased().contains("playing"))
+                    playing: parts[1].lowercased().contains("playing"),
+                    fraction: fraction)
     }
 
     /// cmd is the AppleScript verb: "playpause", "next track", "previous track".

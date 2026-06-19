@@ -27,11 +27,15 @@ Zweispalten-Startmenü, Fenstervorschau (Aero Peek), Platz-Reservierung und ein 
   - läuft ohne Fenster → neues Fenster öffnen
   - nicht gestartet → Programm starten
 - **Anheften/Lösen** per Rechtsklick.
-- **System-Tray** rechts: Akku-Anzeige, Lautstärke (Klick → Slider/Mute), Uhr (Klick → Kalender).
-- **Now-Playing-Spieler** (optional): zeigt den aktuellen Titel aus **Spotify / Apple Music**
-  mit Zurück / Play-Pause / Vor.
+- **System-Tray** rechts: Akku-Anzeige, Lautstärke (Klick → Slider/Mute), Uhr (Klick → Kalender),
+  **WLAN-Symbol** und optionaler **Hardware-Monitor** (CPU/RAM) — beide abschaltbar.
+- **Now-Playing-Spieler** (optional): aktueller Titel aus **Spotify / Apple Music** mit
+  Zurück / Play-Pause / Vor und **Fortschrittsbalken**.
 - **„Desktop anzeigen"**-Streifen ganz rechts.
 - **Drag & Drop**: Taskbar-Icons lassen sich flüssig umsortieren.
+- **Mittelklick** auf ein Icon öffnet ein neues Fenster.
+- **Jump-Lists** per Rechtsklick: Chromium-Profile (Brave/Chrome/…), Finder-Ordner,
+  Terminal (neues Fenster), Mail (neue Nachricht), Spotify/Music (Steuerung), VS Code.
 
 ### Startmenü
 - **Zweispalten-Layout** im Win7-Stil: links eine deckend weiße Programmliste, eingefasst von
@@ -67,10 +71,15 @@ Rechtsklick auf den Orb → **Einstellungen…** öffnet ein zentrales Fenster m
 - Fensterbereich reservieren (Bedienungshilfen)
 - Finder-Klick öffnet immer ein neues Fenster
 - Now-Playing-Spieler anzeigen
+- WLAN-Symbol anzeigen
+- Hardware-Monitor (CPU/RAM) anzeigen
+- Beim Anmelden automatisch starten (`SMAppService`)
 
 ### Sonstiges
 - Nutzt die in macOS gewählte **Akzentfarbe** durchgängig (Highlights, Startmenü, Orb-Glow).
 - **Globaler Hotkey**: **fn (Globe) + Control** öffnet/schließt das Startmenü.
+- **Ctrl + 1…9** startet/aktiviert die n-te angepinnte App (Win-Tasten-Stil).
+- **Enter** im Startmenü startet den ersten Suchtreffer.
 - Reagiert zusätzlich auf eine Distributed Notification (`de.batix.win7taskbar.toggleStart`).
 
 ---
@@ -138,6 +147,9 @@ Sources/Win7Taskbar/
   WindowPreviewController.swift  Vorschau-Panel (Aero Peek)
   WindowSpaceReserver.swift   Platz-Reservierung über Bedienungshilfen
   SystemInfo.swift            Akku (IOKit) & Lautstärke
+  SystemStats.swift           CPU-/RAM-Auslastung (Mach-APIs)
+  TrayWidgets.swift           WLAN-Symbol & Hardware-Monitor
+  JumpList.swift              App-spezifische Rechtsklick-Aktionen
   NowPlaying.swift            Now-Playing-Abfrage/-Steuerung (Spotify/Music)
   NowPlayingView.swift        Now-Playing-Widget in der Taskleiste
   SettingsWindow.swift        Zentrales Einstellfenster

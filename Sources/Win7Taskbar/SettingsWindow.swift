@@ -9,6 +9,9 @@ final class SettingsWindowController: NSObject {
     private let reserveBox = NSButton(checkboxWithTitle: "Fensterbereich reservieren (Bedienungshilfen)", target: nil, action: nil)
     private let finderBox = NSButton(checkboxWithTitle: "Finder-Klick öffnet immer ein neues Fenster", target: nil, action: nil)
     private let nowPlayingBox = NSButton(checkboxWithTitle: "Now-Playing-Spieler in der Taskleiste anzeigen", target: nil, action: nil)
+    private let wifiBox = NSButton(checkboxWithTitle: "WLAN-Symbol anzeigen", target: nil, action: nil)
+    private let monitorBox = NSButton(checkboxWithTitle: "Hardware-Monitor (CPU/RAM) anzeigen", target: nil, action: nil)
+    private let autostartBox = NSButton(checkboxWithTitle: "Beim Anmelden automatisch starten", target: nil, action: nil)
 
     func show() {
         if window == nil { build() }
@@ -19,7 +22,7 @@ final class SettingsWindowController: NSObject {
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 240),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 340),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Windows 7 Taskleiste – Einstellungen"
         w.isReleasedWhenClosed = false
@@ -27,7 +30,8 @@ final class SettingsWindowController: NSObject {
         let title = NSTextField(labelWithString: "Einstellungen")
         title.font = NSFont.boldSystemFont(ofSize: 15)
 
-        for box in [dockBox, reserveBox, finderBox, nowPlayingBox] {
+        let boxes = [dockBox, reserveBox, finderBox, nowPlayingBox, wifiBox, monitorBox, autostartBox]
+        for box in boxes {
             box.target = self
             box.action = #selector(changed(_:))
         }
@@ -35,7 +39,7 @@ final class SettingsWindowController: NSObject {
         let quit = NSButton(title: "Taskleiste beenden", target: self, action: #selector(quitAction))
         quit.bezelStyle = .rounded
 
-        let stack = NSStackView(views: [title, dockBox, reserveBox, finderBox, nowPlayingBox, quit])
+        let stack = NSStackView(views: [title] + boxes + [quit])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -58,6 +62,9 @@ final class SettingsWindowController: NSObject {
         reserveBox.state = c.reserveEnabled ? .on : .off
         finderBox.state = c.finderNewWindow ? .on : .off
         nowPlayingBox.state = c.nowPlayingEnabled ? .on : .off
+        wifiBox.state = c.wifiEnabled ? .on : .off
+        monitorBox.state = c.monitorEnabled ? .on : .off
+        autostartBox.state = c.autostartEnabled ? .on : .off
     }
 
     @objc private func changed(_ sender: NSButton) {
@@ -83,6 +90,12 @@ final class SettingsWindowController: NSObject {
             c.setFinderNewWindow(on)
         case nowPlayingBox:
             c.setShowNowPlaying(on)
+        case wifiBox:
+            c.setShowWifi(on)
+        case monitorBox:
+            c.setShowMonitor(on)
+        case autostartBox:
+            c.setAutostart(on)
         default:
             break
         }

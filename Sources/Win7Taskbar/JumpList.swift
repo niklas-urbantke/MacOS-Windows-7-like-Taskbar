@@ -6,13 +6,42 @@ enum JumpList {
     struct Action { let title: String; let perform: () -> Void }
 
     static func actions(for item: TaskbarItem) -> [Action] {
-        if item.key == "com.apple.finder" {
+        switch item.key {
+        case "com.apple.finder":
             return finderFolders()
+        case "com.apple.Terminal":
+            guard let u = item.url else { return [] }
+            return [Action(title: "Neues Fenster") { openNew(u) }]
+        case "com.apple.mail":
+            return [Action(title: "Neue Nachricht") {
+                if let u = URL(string: "mailto:") { NSWorkspace.shared.open(u) }
+            }]
+        case "com.spotify.client":
+            return mediaActions("Spotify")
+        case "com.apple.Music":
+            return mediaActions("Music")
+        case "com.microsoft.VSCode":
+            guard let u = item.url else { return [] }
+            return [Action(title: "Neues Fenster") { openNew(u, args: ["-n"]) }]
+        default:
+            if let url = item.url, let dir = chromiumSupportDir(item.key) {
+                return chromiumProfiles(appURL: url, supportDir: dir)
+            }
+            return []
         }
-        if let url = item.url, let dir = chromiumSupportDir(item.key) {
-            return chromiumProfiles(appURL: url, supportDir: dir)
-        }
-        return []
+    }
+
+    private static func mediaActions(_ app: String) -> [Action] {
+        [Action(title: "Wiedergabe / Pause") { NowPlaying.command("playpause", app: app) },
+         Action(title: "Weiter")             { NowPlaying.command("next track", app: app) },
+         Action(title: "Zurück")             { NowPlaying.command("previous track", app: app) }]
+    }
+
+    private static func openNew(_ appURL: URL, args: [String] = []) {
+        let p = Process()
+        p.launchPath = "/usr/bin/open"
+        p.arguments = ["-na", appURL.path] + (args.isEmpty ? [] : ["--args"] + args)
+        try? p.run()
     }
 
     // MARK: - Finder: personal folders

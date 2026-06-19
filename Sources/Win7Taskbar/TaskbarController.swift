@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 /// Owns one taskbar window on a given screen and keeps it in sync with running apps.
 final class TaskbarController: NSObject, TaskbarButtonDelegate {
@@ -11,6 +12,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let volume = TrayIconButton(symbol: "speaker.wave.2.fill")
     private let showDesktop = ShowDesktopButton()
     private let nowPlayingView = NowPlayingView(frame: .zero)
+    private let wifiView = WifiView(frame: .zero)
+    private let monitorView = HardwareMonitorView(frame: .zero)
     private let startMenu = StartMenuController()
     private let reserver = WindowSpaceReserver()
     private let preview = WindowPreviewController()
@@ -109,7 +112,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
         for v in [showDesktop, clock, volume] { v.autoresizingMask = [.minXMargin]; glass.addSubview(v) }
         if hasBattery { battery.autoresizingMask = [.minXMargin]; glass.addSubview(battery) }
-        nowPlayingView.autoresizingMask = [.minXMargin]
+        for v in [nowPlayingView, wifiView, monitorView] { v.autoresizingMask = [.minXMargin] }
 
         layoutTray()
     }
@@ -124,6 +127,20 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         x -= Theme.clockWidth;       clock.frame       = NSRect(x: x, y: 0, width: Theme.clockWidth, height: h)
         x -= Theme.volumeWidth;      volume.frame      = NSRect(x: x, y: 0, width: Theme.volumeWidth, height: h)
         if hasBattery { x -= Theme.batteryWidth; battery.frame = NSRect(x: x, y: 0, width: Theme.batteryWidth, height: h) }
+
+        if wifiEnabled {
+            x -= Theme.wifiWidth
+            wifiView.frame = NSRect(x: x, y: 0, width: Theme.wifiWidth, height: h)
+            if wifiView.superview == nil { glass.addSubview(wifiView) }
+            wifiView.refresh()
+        } else { wifiView.removeFromSuperview() }
+
+        if monitorEnabled {
+            x -= Theme.monitorWidth
+            monitorView.frame = NSRect(x: x, y: 0, width: Theme.monitorWidth, height: h)
+            if monitorView.superview == nil { glass.addSubview(monitorView) }
+            monitorView.refresh()
+        } else { monitorView.removeFromSuperview() }
 
         if nowPlayingEnabled {
             x -= Theme.nowPlayingWidth
@@ -258,6 +275,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         item.runningApp?.terminate()
     }
 
+    func taskbarButtonMiddleClicked(_ item: TaskbarItem) {
+        // Middle-click opens a new window / instance, like the Win7 taskbar.
+        if let url = item.url { NSWorkspace.shared.open(url) }
+    }
+
     func taskbarButtonHover(_ item: TaskbarItem, button: TaskbarButton) {
         guard let app = item.runningApp, !app.isTerminated else { return }
         let f = button.frame   // in glass (== window content) coordinates
@@ -378,6 +400,23 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         layoutTray()
     }
 
+    // WLAN-Symbol (Standard: an).
+    var wifiEnabled: Bool {
+        UserDefaults.standard.object(forKey: "showWifi") == nil ? true : UserDefaults.standard.bool(forKey: "showWifi")
+    }
+    func setShowWifi(_ on: Bool) { UserDefaults.standard.set(on, forKey: "showWifi"); layoutTray() }
+
+    // Hardware-Monitor (Standard: aus).
+    var monitorEnabled: Bool { UserDefaults.standard.bool(forKey: "showMonitor") }
+    func setShowMonitor(_ on: Bool) { UserDefaults.standard.set(on, forKey: "showMonitor"); layoutTray() }
+
+    // Autostart via SMAppService.
+    var autostartEnabled: Bool { SMAppService.mainApp.status == .enabled }
+    func setAutostart(_ on: Bool) {
+        do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
+        catch { NSLog("Autostart: \(error)") }
+    }
+
     private func openNewFinderWindow() {
         let p = Process()
         p.launchPath = "/usr/bin/osascript"
@@ -405,6 +444,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             self.battery.refresh()
             self.updateBarVisibility()
             self.tick += 1
+            if self.wifiEnabled && self.tick % 5 == 0 { self.wifiView.refresh() }
+            if self.monitorEnabled && self.tick % 2 == 0 { self.monitorView.refresh() }
             if self.nowPlayingEnabled && self.tick % 3 == 0 { self.nowPlayingView.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -498,6 +539,21 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             handler(event); return event
         }
         if let l { hotkeyMonitors.append(l) }
+
+        // Ctrl + 1…9 activates / launches the n-th pinned app (Win-key style).
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] in self?.handleNumberHotkey($0) }) {
+            hotkeyMonitors.append(g)
+        }
+    }
+
+    private func handleNumberHotkey(_ event: NSEvent) {
+        let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard mods == [.control],
+              let chars = event.charactersIgnoringModifiers, let n = Int(chars), (1...9).contains(n)
+        else { return }
+        let pinned = items.filter { $0.pinned }
+        guard n - 1 < pinned.count else { return }
+        taskbarButtonClicked(pinned[n - 1])
     }
 
     // MARK: - Full-screen handling

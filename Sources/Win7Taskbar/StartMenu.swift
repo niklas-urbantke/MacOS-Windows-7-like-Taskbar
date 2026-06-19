@@ -13,6 +13,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private var showingAll = false
     private var alleButton: LeftRowButton?
     private var fileSearchToken = 0
+    private var firstResult: AppEntry?
     weak var taskbarController: TaskbarController?
 
     private let W = Theme.startWidth
@@ -213,6 +214,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
             apps = pinned + recents
         }
 
+        firstResult = apps.first
         for app in apps.prefix(300) {
             let row = AppRowButton(entry: app,
                                    pinned: StartPins.isPinned(app.bundleID),
@@ -344,6 +346,14 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     @objc private func resignedKey() { hide() }
 
     func controlTextDidChange(_ obj: Notification) { reloadList(filter: searchField.stringValue) }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)), let entry = firstResult {
+            launch(entry)
+            return true
+        }
+        return false
+    }
 
     // MARK: - Actions
 

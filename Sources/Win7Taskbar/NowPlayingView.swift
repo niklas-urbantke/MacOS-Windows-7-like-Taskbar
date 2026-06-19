@@ -56,7 +56,7 @@ final class NowPlayingView: NSView {
         playButton.isHidden = !hasTrack
         nextButton.isHidden = !hasTrack
         playButton.image = NowPlayingView.symbol((info?.playing ?? false) ? "pause.fill" : "play.fill")
-        if changed { needsDisplay = true }       // avoid needless redraws/flicker
+        if changed || info != nil { needsDisplay = true }   // keep progress bar fresh
     }
 
     // MARK: - Actions
@@ -64,7 +64,8 @@ final class NowPlayingView: NSView {
     @objc private func playAction() {
         // Optimistic: flip the icon immediately so it feels instant.
         if let i = info {
-            info = NowPlaying.Info(app: i.app, title: i.title, artist: i.artist, playing: !i.playing)
+            info = NowPlaying.Info(app: i.app, title: i.title, artist: i.artist,
+                                   playing: !i.playing, fraction: i.fraction)
             playButton.image = NowPlayingView.symbol(info!.playing ? "pause.fill" : "play.fill")
         }
         send("playpause", refreshAfter: 0.35)
@@ -100,9 +101,17 @@ final class NowPlayingView: NSView {
         let textW = controlsLeft - 12
         guard textW > 30 else { return }
         NSAttributedString(string: info.title, attributes: titleAttrs)
-            .draw(in: NSRect(x: 8, y: bounds.midY + 1, width: textW, height: 15))
+            .draw(in: NSRect(x: 8, y: bounds.midY + 3, width: textW, height: 15))
         NSAttributedString(string: info.artist, attributes: artistAttrs)
-            .draw(in: NSRect(x: 8, y: bounds.midY - 15, width: textW, height: 13))
+            .draw(in: NSRect(x: 8, y: bounds.midY - 12, width: textW, height: 13))
+
+        // Progress bar.
+        let track = NSRect(x: 8, y: 7, width: textW, height: 2)
+        NSColor(calibratedWhite: 1, alpha: 0.25).setFill()
+        NSBezierPath(roundedRect: track, xRadius: 1, yRadius: 1).fill()
+        Theme.accent(brightness: 1.3).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 8, y: 7, width: textW * CGFloat(info.fraction), height: 2),
+                     xRadius: 1, yRadius: 1).fill()
     }
 
     // MARK: - Helpers

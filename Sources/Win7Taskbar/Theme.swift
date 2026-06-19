@@ -34,6 +34,8 @@ enum Theme {
     static let batteryWidth: CGFloat = 56
     static let volumeWidth: CGFloat = 30
     static let nowPlayingWidth: CGFloat = 210
+    static let wifiWidth: CGFloat = 30
+    static let monitorWidth: CGFloat = 80
 
     // macOS accent colour the user picked in System Settings, with brightness variants.
     static var accent: NSColor { NSColor.controlAccentColor }
