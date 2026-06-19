@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// Central settings window collecting all toggles.
 final class SettingsWindowController: NSObject {
@@ -26,18 +27,21 @@ final class SettingsWindowController: NSObject {
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 470, height: 280),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 290),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Windows 7 Taskleiste – Einstellungen"
         w.isReleasedWhenClosed = false
 
         // Start-orb selection.
-        orbs = controller?.availableOrbs ?? []
-        orbPopup.removeAllItems()
-        orbPopup.addItems(withTitles: orbs.map { $0.label })
         orbPopup.target = self
         orbPopup.action = #selector(orbChanged)
-        let orbRow = NSStackView(views: [NSTextField(labelWithString: "Start-Symbol:"), orbPopup])
+        reloadOrbPopup()
+        let addButton = NSButton(title: "Orb hinzufügen…", target: self, action: #selector(addOrbAction))
+        addButton.bezelStyle = .rounded
+        let folderButton = NSButton(title: "Ordner…", target: self, action: #selector(openFolderAction))
+        folderButton.bezelStyle = .rounded
+        let orbRow = NSStackView(views: [NSTextField(labelWithString: "Start-Symbol:"),
+                                         orbPopup, addButton, folderButton])
         orbRow.orientation = .horizontal
         orbRow.spacing = 8
 
@@ -114,6 +118,37 @@ final class SettingsWindowController: NSObject {
               orbPopup.indexOfSelectedItem < orbs.count else { return }
         c.setOrb(orbs[orbPopup.indexOfSelectedItem].file)
     }
+
+    private func reloadOrbPopup() {
+        orbs = controller?.availableOrbs ?? []
+        orbPopup.removeAllItems()
+        orbPopup.addItems(withTitles: orbs.map { $0.label })
+        if let file = controller?.selectedOrbFile,
+           let idx = orbs.firstIndex(where: { $0.file == file }) {
+            orbPopup.selectItem(at: idx)
+        }
+    }
+
+    @objc private func addOrbAction() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "PNG mit drei gestapelten Zuständen (normal / Hover / gedrückt) wählen"
+        let handler: (NSApplication.ModalResponse) -> Void = { [weak self] resp in
+            guard resp == .OK, let url = panel.url, let self, let c = self.controller else { return }
+            if let file = c.addOrb(from: url) {
+                self.reloadOrbPopup()
+                if let idx = self.orbs.firstIndex(where: { $0.file == file }) {
+                    self.orbPopup.selectItem(at: idx)
+                }
+            }
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: handler) }
+        else { panel.begin(completionHandler: handler) }
+    }
+
+    @objc private func openFolderAction() { controller?.openOrbsFolder() }
 
     @objc private func changed(_ sender: NSButton) {
         guard let c = controller else { return }

@@ -467,6 +467,14 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     var selectedOrbFile: String { OrbCatalog.selectedFile }
     func setOrb(_ file: String) { OrbCatalog.select(file); orb.reloadOrb() }
 
+    /// Import a PNG as a new orb; returns its filename (and applies it).
+    func addOrb(from url: URL) -> String? {
+        guard let file = OrbCatalog.importOrb(from: url) else { return nil }
+        setOrb(file)
+        return file
+    }
+    func openOrbsFolder() { NSWorkspace.shared.open(OrbCatalog.userDir) }
+
     // Autostart via SMAppService.
     var autostartEnabled: Bool { SMAppService.mainApp.status == .enabled }
     func setAutostart(_ on: Bool) {
