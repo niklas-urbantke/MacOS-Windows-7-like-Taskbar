@@ -140,34 +140,19 @@ final class TaskbarButton: NSControl {
         let running = item.isRunning && !finderDesktopOnly
         let active = item.isActive && !finderDesktopOnly
 
-        // Win7 "stacked" look when the app has several windows: offset layers behind the button.
-        if item.windowCount > 1 {
-            let layers = min(item.windowCount - 1, 2)
-            for i in stride(from: layers, through: 1, by: -1) {
-                let off = CGFloat(i) * 3
-                // Stacked sideways (to the right), Windows-7 style.
-                let r = NSRect(x: inset.minX + off, y: inset.minY, width: inset.width, height: inset.height)
-                let p = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
-                Theme.runningFill.setFill(); p.fill()
-                Theme.runningStroke.setStroke(); p.lineWidth = 1; p.stroke()
-            }
-        }
-
         if active {
-            // Accent-tinted glass for the active app.
-            let top = Theme.accent(brightness: 1.25, saturation: 0.7, alpha: 0.45)
-            let bottom = Theme.accent(brightness: 0.85, saturation: 1.0, alpha: 0.45)
-            NSGradient(colors: [top, bottom])?.draw(in: path, angle: -90)
+            // Glassy translucent highlight for the active app (no colour tint, just lifted glass).
+            NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.46),
+                                NSColor(calibratedWhite: 1, alpha: 0.16)])?.draw(in: path, angle: -90)
             addGloss(to: inset, radius: radius)
-            Theme.accent(brightness: 1.2, alpha: 0.8).setStroke()
+            NSColor(calibratedWhite: 1, alpha: 0.75).setStroke()
             path.lineWidth = 1
             path.stroke()
         } else if hovering {
-            let top = Theme.accent(brightness: 1.3, saturation: 0.5, alpha: 0.28)
-            let bottom = Theme.accent(brightness: 1.0, saturation: 0.7, alpha: 0.28)
-            NSGradient(colors: [top, bottom])?.draw(in: path, angle: -90)
+            NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.28),
+                                NSColor(calibratedWhite: 1, alpha: 0.09)])?.draw(in: path, angle: -90)
             addGloss(to: inset, radius: radius)
-            Theme.accent(brightness: 1.2, alpha: 0.5).setStroke(); path.lineWidth = 1; path.stroke()
+            NSColor(calibratedWhite: 1, alpha: 0.45).setStroke(); path.lineWidth = 1; path.stroke()
         } else if running {
             Theme.runningFill.setFill(); path.fill()
             Theme.runningStroke.setStroke(); path.lineWidth = 1; path.stroke()
@@ -182,15 +167,21 @@ final class TaskbarButton: NSControl {
                        operation: .sourceOver,
                        fraction: running ? 1.0 : 0.78)
 
-        // Running indicator: a thin lit underline along the bottom of the button.
-        if running {
-            let color = active ? Theme.accent(brightness: 1.3) : Theme.accent(brightness: 1.0, alpha: 0.7)
-            color.setStroke()
-            let underline = NSBezierPath()
-            underline.move(to: NSPoint(x: inset.minX + 8, y: inset.minY + 2))
-            underline.line(to: NSPoint(x: inset.maxX - 8, y: inset.minY + 2))
-            underline.lineWidth = 2.5
-            underline.stroke()
+        // Win7 "stacked" look for several windows: nested frame edges stepping in from the
+        // RIGHT, clipped to the button so the left stays clean and nothing spills onto a
+        // neighbour. Outlines only → the glass translucency is unchanged. More windows → narrower.
+        if item.windowCount > 1 {
+            let extra = min(item.windowCount - 1, 3)
+            let spacing: CGFloat = extra <= 1 ? 6 : (extra == 2 ? 5 : 4)
+            NSColor(calibratedWhite: 1, alpha: 0.5).setStroke()
+            for i in 1...extra {
+                let x = inset.maxX - CGFloat(i) * spacing
+                let line = NSBezierPath()
+                line.move(to: NSPoint(x: x, y: inset.minY + radius))
+                line.line(to: NSPoint(x: x, y: inset.maxY - radius))
+                line.lineWidth = 1
+                line.stroke()
+            }
         }
     }
 
