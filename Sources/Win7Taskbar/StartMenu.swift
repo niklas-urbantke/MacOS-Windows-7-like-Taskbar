@@ -9,6 +9,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private let scrollView = NSScrollView()
     private let searchField = NSTextField()
     private let tint = ColumnTintView(frame: .zero)
+    private let avatar = AvatarView(frame: .zero)
     private let listDoc = FlippedView()        // manual-layout document view (fast for long lists)
     private var listY: CGFloat = 0
     private static var iconCache: [String: NSImage] = [:]
@@ -78,8 +79,8 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
 
         // Avatar straddling the top edge of the menu — half above (in the transparent strip).
         let avatarSize: CGFloat = 99
-        let avatar = AvatarView(frame: NSRect(x: leftW + (W - leftW - avatarSize) / 2,
-                                              y: H - avatarSize / 2, width: avatarSize, height: avatarSize))
+        avatar.frame = NSRect(x: leftW + (W - leftW - avatarSize) / 2,
+                              y: H - avatarSize / 2, width: avatarSize, height: avatarSize)
         outer.addSubview(avatar)
 
         window.contentView = outer
@@ -333,6 +334,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         alleButton?.setTitle("Alle Programme", back: false)
         searchField.stringValue = ""
         root.subviews.forEach { $0.needsDisplay = true }   // reflect a possible style change
+        avatar.needsDisplay = true
         reloadList(filter: "")
 
         let x = max(screen.frame.minX, orbScreenRect.minX)
@@ -510,12 +512,19 @@ private final class AvatarView: NSView {
         let outer = bounds.insetBy(dx: 1, dy: 1)
         let outerPath = NSBezierPath(roundedRect: outer, xRadius: 9, yRadius: 9)
 
-        // Glassy frame body, tinted with the accent colour (light on top → accent at bottom).
-        let frameTop = Theme.accent(brightness: 1.5, saturation: 0.22)
-        let frameMid = Theme.accent(brightness: 1.15, saturation: 0.55)
-        let frameBot = Theme.accent(brightness: 0.80, saturation: 0.95)
-        NSGradient(colors: [frameTop, frameMid, frameBot],
-                   atLocations: [0, 0.5, 1], colorSpace: .sRGB)?.draw(in: outerPath, angle: -90)
+        // Glassy frame body — accent-tinted, or silver in Aero mode (matching the menu style).
+        let frameColors: [NSColor]
+        if UserDefaults.standard.string(forKey: "menuStyle") == "aero" {
+            frameColors = [NSColor(calibratedWhite: 0.96, alpha: 1),
+                           NSColor(calibratedWhite: 0.78, alpha: 1),
+                           NSColor(calibratedWhite: 0.55, alpha: 1)]
+        } else {
+            frameColors = [Theme.accent(brightness: 1.5, saturation: 0.22),
+                           Theme.accent(brightness: 1.15, saturation: 0.55),
+                           Theme.accent(brightness: 0.80, saturation: 0.95)]
+        }
+        NSGradient(colors: frameColors, atLocations: [0, 0.5, 1], colorSpace: .sRGB)?
+            .draw(in: outerPath, angle: -90)
 
         // Gloss highlight over the upper half of the frame.
         NSGraphicsContext.current?.saveGraphicsState()
