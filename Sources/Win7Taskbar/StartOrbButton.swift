@@ -73,7 +73,7 @@ final class StartOrbButton: NSControl {
     override func draw(_ dirtyRect: NSRect) {
         // The orb art sits inside transparent padding, so we crop to the content and let it
         // fill the bar height (overflowing slightly into the clipped glow margin).
-        let base = orbImage != nil ? bounds.height * 1.18 : min(bounds.width - 4, bounds.height - 2)
+        let base = orbImage != nil ? bounds.height * 1.18 - 3 : min(bounds.width - 4, bounds.height - 2)
         let d = base * (1 - 0.05 * press)                 // depress slightly when pressed
         let rect = NSRect(x: (bounds.width - d) / 2, y: (bounds.height - d) / 2, width: d, height: d)
 

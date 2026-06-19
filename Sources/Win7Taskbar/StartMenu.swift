@@ -301,13 +301,46 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
 
         let x = max(screen.frame.minX, orbScreenRect.minX)
         let y = orbScreenRect.maxY + 1
-        window.setFrameOrigin(NSPoint(x: x, y: y))
+        let finalOrigin = NSPoint(x: x, y: y)
+
         NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+
+        // Always sits above the taskbar (no positional slide → never overlaps the bar).
+        window.setFrameOrigin(finalOrigin)
+        if reduceMotion {
+            window.alphaValue = 1
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            window.alphaValue = 0
+            window.makeKeyAndOrderFront(nil)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.22
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                window.animator().alphaValue = 1
+            }
+        }
         window.makeFirstResponder(searchField)
     }
 
-    func hide() { window.orderOut(nil) }
+    func hide() {
+        guard window.isVisible else { return }
+        if reduceMotion {
+            window.orderOut(nil)
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            window.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            self?.window.orderOut(nil)
+            self?.window.alphaValue = 1   // reset for next open
+        })
+    }
+
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
     @objc private func resignedKey() { hide() }
 
     func controlTextDidChange(_ obj: Notification) { reloadList(filter: searchField.stringValue) }

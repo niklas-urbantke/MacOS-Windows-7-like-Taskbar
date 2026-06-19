@@ -19,6 +19,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private var clockTimer: Timer?
     private var trayLeftX: CGFloat = 0
     private let hasBattery = SystemInfo.battery() != nil
+    private var hotkeyMonitors: [Any] = []
+    private var hotkeyArmed = true
 
     private let calendarPopover = NSPopover()
     private let volumePopover = NSPopover()
@@ -43,6 +45,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         volume.onClick = { [weak self] in self?.showVolume() }
 
         registerObservers()
+        installHotkey()
         DistributedNotificationCenter.default().addObserver(
             self, selector: #selector(toggleStart),
             name: NSNotification.Name("de.batix.win7taskbar.toggleStart"), object: nil)
@@ -412,6 +415,30 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     }
 
     @objc private func appsChanged() { rebuildItems() }
+
+    // MARK: - Global hotkey (fn/Globe + Control toggles the Start menu)
+
+    private func installHotkey() {
+        let handler: (NSEvent) -> Void = { [weak self] event in
+            guard let self else { return }
+            let f = event.modifierFlags
+            let bothDown = f.contains(.control) && f.contains(.function)
+            if bothDown && self.hotkeyArmed {
+                self.hotkeyArmed = false
+                self.toggleStart()
+            } else if !bothDown {
+                self.hotkeyArmed = true
+            }
+        }
+        // Global (other apps focused) + local (our menu focused).
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: handler) {
+            hotkeyMonitors.append(g)
+        }
+        let l = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+            handler(event); return event
+        }
+        if let l { hotkeyMonitors.append(l) }
+    }
 
     // MARK: - Full-screen handling
 
