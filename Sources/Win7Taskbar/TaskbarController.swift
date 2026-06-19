@@ -255,14 +255,16 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
                 let s = WindowPreview.windowSummary(pid: pid)
                 counts[key] = s.visible + s.minimized
             }
+            let badges = DockBadges.current()   // [appName: badge] (Slack/Teams unread …)
             DispatchQueue.main.async {
                 guard let self else { return }
                 var changed = false
-                for item in self.items where counts[item.key] != nil {
-                    if item.windowCount != counts[item.key] {
-                        item.windowCount = counts[item.key]!
-                        changed = true
+                for item in self.items {
+                    if let c = counts[item.key], item.windowCount != c {
+                        item.windowCount = c; changed = true
                     }
+                    let newBadge = badges[item.name]
+                    if item.badge != newBadge { item.badge = newBadge; changed = true }
                 }
                 if changed { self.buttons.forEach { $0.needsDisplay = true } }
             }

@@ -169,6 +169,29 @@ final class TaskbarButton: NSControl {
                        operation: .sourceOver,
                        fraction: running ? 1.0 : 0.78)
 
+        // Notification badge (e.g. Slack/Teams unread) in the top-right of the icon.
+        if let badge = item.badge {
+            let d = Theme.s(16)
+            let r = NSRect(x: iconRect.maxX - d + Theme.s(3),
+                           y: iconRect.maxY - d + Theme.s(3), width: d, height: d)
+            NSColor.systemRed.setFill()
+            NSBezierPath(ovalIn: r).fill()
+            NSColor.white.setStroke()
+            let ring = NSBezierPath(ovalIn: r.insetBy(dx: 0.5, dy: 0.5))
+            ring.lineWidth = max(1, Theme.s(1.5))
+            ring.stroke()
+
+            let text = badge.count <= 2 ? badge : "·"
+            let style = NSMutableParagraphStyle(); style.alignment = .center
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: Theme.font(9.5, weight: .bold),
+                .foregroundColor: NSColor.white,
+                .paragraphStyle: style,
+            ]
+            let s = NSAttributedString(string: text, attributes: attrs)
+            s.draw(in: NSRect(x: r.minX, y: r.midY - s.size().height / 2, width: r.width, height: s.size().height))
+        }
+
         // Win7 "stacked" look for several windows: nested frame edges stepping in from the
         // RIGHT, clipped to the button so the left stays clean and nothing spills onto a
         // neighbour. Outlines only → the glass translucency is unchanged. More windows → narrower.

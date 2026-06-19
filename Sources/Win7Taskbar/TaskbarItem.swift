@@ -9,6 +9,7 @@ final class TaskbarItem {
     var runningApp: NSRunningApplication?
     var pinned: Bool
     var windowCount: Int = 1   // für die Win7-Stapel-Optik bei mehreren Fenstern
+    var badge: String?         // Dock-Benachrichtigungs-Badge (z. B. "3"), falls vorhanden
 
     init(key: String, name: String, icon: NSImage, url: URL?,
          runningApp: NSRunningApplication?, pinned: Bool) {
