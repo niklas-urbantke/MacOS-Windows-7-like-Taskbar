@@ -19,6 +19,15 @@ struct PreviewItem {
 
 enum WindowPreview {
     static var hasScreenRecording: Bool { CGPreflightScreenCaptureAccess() }
+
+    /// Hide Finder's untitled desktop window (default on).
+    private static var hideFinderDesktop: Bool {
+        UserDefaults.standard.object(forKey: "hideFinderDesktop") == nil
+            ? true : UserDefaults.standard.bool(forKey: "hideFinderDesktop")
+    }
+    private static func isFinder(_ pid: pid_t) -> Bool {
+        NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.apple.finder"
+    }
     @discardableResult
     static func requestScreenRecording() -> Bool { CGRequestScreenCaptureAccess() }
 
@@ -56,7 +65,7 @@ enum WindowPreview {
         guard AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &value) == .success,
               let wins = value as? [AXUIElement] else { return [] }
 
-        return wins.prefix(10).map { win in
+        var result = wins.prefix(10).map { win -> AXWin in
             var titleRef: CFTypeRef?
             AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &titleRef)
             var minRef: CFTypeRef?
@@ -68,6 +77,11 @@ enum WindowPreview {
                          minimized: (minRef as? Bool) ?? false,
                          windowID: wid)
         }
+        // Drop Finder's untitled desktop window.
+        if hideFinderDesktop && isFinder(pid) {
+            result = result.filter { !$0.title.trimmingCharacters(in: .whitespaces).isEmpty }
+        }
+        return result
     }
 
     // MARK: - ScreenCaptureKit
@@ -84,8 +98,10 @@ enum WindowPreview {
 
     private static func thumbnailsOnly(pid: pid_t) async -> [PreviewItem] {
         let map = await sckWindowMap(pid: pid)
+        let skipDesktop = hideFinderDesktop && isFinder(pid)
         var items: [PreviewItem] = []
         for w in map.values where w.windowLayer == 0 && w.frame.width > 60 && w.frame.height > 60 {
+            if skipDesktop && (w.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty { continue }
             let img = await capture(w)
             items.append(PreviewItem(title: w.title ?? "", image: img, axElement: nil,
                                      windowID: w.windowID, isMinimized: false, appIcon: nil))

@@ -227,29 +227,65 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             glass.addSubview(b)
             buttons.append(b)
         }
+        updateWindowCounts()
+    }
+
+    /// Asynchronously counts each running app's windows (AX) for the grouped "stacked" look.
+    private func updateWindowCounts() {
+        let snapshot: [(String, pid_t)] = items.compactMap {
+            guard let app = $0.runningApp, !app.isTerminated else { return nil }
+            return ($0.key, app.processIdentifier)
+        }
+        guard !snapshot.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            var counts: [String: Int] = [:]
+            for (key, pid) in snapshot {
+                let s = WindowPreview.windowSummary(pid: pid)
+                counts[key] = s.visible + s.minimized
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                var changed = false
+                for item in self.items where counts[item.key] != nil {
+                    if item.windowCount != counts[item.key] {
+                        item.windowCount = counts[item.key]!
+                        changed = true
+                    }
+                }
+                if changed { self.buttons.forEach { $0.needsDisplay = true } }
+            }
+        }
     }
 
     // MARK: - TaskbarButtonDelegate
 
-    func taskbarButtonClicked(_ item: TaskbarItem) {
+    func taskbarButtonClicked(_ item: TaskbarItem, button: TaskbarButton?) {
         if let app = item.runningApp, !app.isTerminated {
-            // Option: Finder always opens a brand-new window on click.
+            let pid = app.processIdentifier
+
+            // 1) Finder option has priority: always open a fresh window.
             if app.bundleIdentifier == "com.apple.finder" && Self.finderAlwaysNewWindow {
                 openNewFinderWindow()
                 return
             }
-            let pid = app.processIdentifier
+            // 2) Grouped app (several windows): show the previews so the user picks one.
+            if item.windowCount > 1, let button {
+                taskbarButtonHover(item, button: button)
+                return
+            }
+            // 3) Single window: toggle front/hide, restore, or open a new window.
             let s = WindowPreview.windowSummary(pid: pid)
             if s.visible > 0 {
-                // Has open windows: toggle front/hide.
                 if app.isActive { app.hide() }
                 else { app.activate(options: [.activateAllWindows]) }
             } else if s.minimized > 0 {
-                // Only minimised windows: restore them.
                 WindowPreview.unminimizeAndRaise(pid: pid)
             } else {
-                // Running but no windows: re-open to create a fresh window (like a Dock click).
-                if let url = app.bundleURL ?? item.url {
+                // No windows: open a fresh one. Finder needs the AppleScript route to
+                // reliably open on the first click (its reopen is flaky).
+                if app.bundleIdentifier == "com.apple.finder" {
+                    openNewFinderWindow()
+                } else if let url = app.bundleURL ?? item.url {
                     NSWorkspace.shared.open(url)
                 } else {
                     app.activate(options: [.activateAllWindows])
@@ -410,6 +446,27 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     var monitorEnabled: Bool { UserDefaults.standard.bool(forKey: "showMonitor") }
     func setShowMonitor(_ on: Bool) { UserDefaults.standard.set(on, forKey: "showMonitor"); layoutTray() }
 
+    // Finder-Desktopfenster ausblenden (Standard: an).
+    var hideFinderDesktopEnabled: Bool {
+        UserDefaults.standard.object(forKey: "hideFinderDesktop") == nil ? true : UserDefaults.standard.bool(forKey: "hideFinderDesktop")
+    }
+    func setHideFinderDesktop(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "hideFinderDesktop")
+        updateWindowCounts()
+    }
+
+    // Icon-Rahmen über volle Höhe.
+    var fullHeightIcons: Bool { UserDefaults.standard.bool(forKey: "fullHeightIcons") }
+    func setFullHeightIcons(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "fullHeightIcons")
+        buttons.forEach { $0.needsDisplay = true }
+    }
+
+    // Start-Orb-Auswahl.
+    var availableOrbs: [(label: String, file: String)] { OrbCatalog.available().map { ($0.label, $0.file) } }
+    var selectedOrbFile: String { OrbCatalog.selectedFile }
+    func setOrb(_ file: String) { OrbCatalog.select(file); orb.reloadOrb() }
+
     // Autostart via SMAppService.
     var autostartEnabled: Bool { SMAppService.mainApp.status == .enabled }
     func setAutostart(_ on: Bool) {
@@ -444,6 +501,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             self.battery.refresh()
             self.updateBarVisibility()
             self.tick += 1
+            if self.tick % 2 == 0 { self.updateWindowCounts() }
             if self.wifiEnabled && self.tick % 5 == 0 { self.wifiView.refresh() }
             if self.monitorEnabled && self.tick % 2 == 0 { self.monitorView.refresh() }
             if self.nowPlayingEnabled && self.tick % 3 == 0 { self.nowPlayingView.refresh() }
@@ -553,7 +611,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         else { return }
         let pinned = items.filter { $0.pinned }
         guard n - 1 < pinned.count else { return }
-        taskbarButtonClicked(pinned[n - 1])
+        taskbarButtonClicked(pinned[n - 1], button: nil)
     }
 
     // MARK: - Full-screen handling

@@ -17,10 +17,11 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-# Optionales eigenes Orb-Bild: lege "orb.png" ins Projektverzeichnis, dann wird es genutzt.
-if [ -f "orb.png" ]; then
-    cp "orb.png" "$APP_BUNDLE/Contents/Resources/orb.png"
-    echo "▶ orb.png eingebunden"
+# Orb-Bilder aus dem Ordner "orbs/" einbinden (Auswahl im Einstellfenster).
+if [ -d "orbs" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/orbs"
+    cp orbs/*.png "$APP_BUNDLE/Contents/Resources/orbs/" 2>/dev/null
+    echo "▶ Orbs eingebunden: $(ls orbs/*.png 2>/dev/null | xargs -n1 basename | paste -sd ', ' -)"
 fi
 
 cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST

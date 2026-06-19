@@ -8,6 +8,7 @@ final class TaskbarItem {
     var url: URL?                    // launch target for pinned / not-running apps
     var runningApp: NSRunningApplication?
     var pinned: Bool
+    var windowCount: Int = 1   // für die Win7-Stapel-Optik bei mehreren Fenstern
 
     init(key: String, name: String, icon: NSImage, url: URL?,
          runningApp: NSRunningApplication?, pinned: Bool) {

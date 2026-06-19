@@ -1,7 +1,7 @@
 import AppKit
 
 protocol TaskbarButtonDelegate: AnyObject {
-    func taskbarButtonClicked(_ item: TaskbarItem)
+    func taskbarButtonClicked(_ item: TaskbarItem, button: TaskbarButton?)
     func taskbarButtonToggledPin(_ item: TaskbarItem)
     func taskbarButtonQuit(_ item: TaskbarItem)
     func taskbarButtonHover(_ item: TaskbarItem, button: TaskbarButton)
@@ -75,7 +75,7 @@ final class TaskbarButton: NSControl {
         if dragStarted {
             buttonDelegate?.taskbarButtonDragEnded(self)
         } else {
-            buttonDelegate?.taskbarButtonClicked(item)
+            buttonDelegate?.taskbarButtonClicked(item, button: self)
         }
         dragStarted = false
     }
@@ -126,15 +126,36 @@ final class TaskbarButton: NSControl {
     @objc private func quitAction() { buttonDelegate?.taskbarButtonQuit(item) }
 
     override func draw(_ dirtyRect: NSRect) {
-        let inset = bounds.insetBy(dx: 2, dy: 4)
-        let path = NSBezierPath(roundedRect: inset, xRadius: 5, yRadius: 5)
+        // Option: button frames spanning the full bar height (top to bottom).
+        let full = UserDefaults.standard.bool(forKey: "fullHeightIcons")
+        let inset = full ? bounds.insetBy(dx: 1, dy: 0) : bounds.insetBy(dx: 2, dy: 4)
+        let radius: CGFloat = full ? 2 : 5
+        let path = NSBezierPath(roundedRect: inset, xRadius: radius, yRadius: radius)
 
-        if item.isActive {
+        // Finder with only its (untitled) desktop window counts as "not open".
+        let finderDesktopOnly = (item.key == "com.apple.finder" && item.windowCount == 0)
+        let running = item.isRunning && !finderDesktopOnly
+        let active = item.isActive && !finderDesktopOnly
+
+        // Win7 "stacked" look when the app has several windows: offset layers behind the button.
+        if item.windowCount > 1 {
+            let layers = min(item.windowCount - 1, 2)
+            for i in stride(from: layers, through: 1, by: -1) {
+                let off = CGFloat(i) * 3
+                // Stacked sideways (to the right), Windows-7 style.
+                let r = NSRect(x: inset.minX + off, y: inset.minY, width: inset.width, height: inset.height)
+                let p = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+                Theme.runningFill.setFill(); p.fill()
+                Theme.runningStroke.setStroke(); p.lineWidth = 1; p.stroke()
+            }
+        }
+
+        if active {
             // Accent-tinted glass for the active app.
             let top = Theme.accent(brightness: 1.25, saturation: 0.7, alpha: 0.45)
             let bottom = Theme.accent(brightness: 0.85, saturation: 1.0, alpha: 0.45)
             NSGradient(colors: [top, bottom])?.draw(in: path, angle: -90)
-            addGloss(to: inset)
+            addGloss(to: inset, radius: radius)
             Theme.accent(brightness: 1.2, alpha: 0.8).setStroke()
             path.lineWidth = 1
             path.stroke()
@@ -142,9 +163,9 @@ final class TaskbarButton: NSControl {
             let top = Theme.accent(brightness: 1.3, saturation: 0.5, alpha: 0.28)
             let bottom = Theme.accent(brightness: 1.0, saturation: 0.7, alpha: 0.28)
             NSGradient(colors: [top, bottom])?.draw(in: path, angle: -90)
-            addGloss(to: inset)
+            addGloss(to: inset, radius: radius)
             Theme.accent(brightness: 1.2, alpha: 0.5).setStroke(); path.lineWidth = 1; path.stroke()
-        } else if item.isRunning {
+        } else if running {
             Theme.runningFill.setFill(); path.fill()
             Theme.runningStroke.setStroke(); path.lineWidth = 1; path.stroke()
         }
@@ -156,11 +177,11 @@ final class TaskbarButton: NSControl {
         item.icon.draw(in: iconRect,
                        from: .zero,
                        operation: .sourceOver,
-                       fraction: item.isRunning ? 1.0 : 0.78)
+                       fraction: running ? 1.0 : 0.78)
 
         // Running indicator: a thin lit underline along the bottom of the button.
-        if item.isRunning {
-            let color = item.isActive ? Theme.accent(brightness: 1.3) : Theme.accent(brightness: 1.0, alpha: 0.7)
+        if running {
+            let color = active ? Theme.accent(brightness: 1.3) : Theme.accent(brightness: 1.0, alpha: 0.7)
             color.setStroke()
             let underline = NSBezierPath()
             underline.move(to: NSPoint(x: inset.minX + 8, y: inset.minY + 2))
@@ -171,9 +192,9 @@ final class TaskbarButton: NSControl {
     }
 
     /// Aero gloss: a bright highlight over the top half of the button.
-    private func addGloss(to rect: NSRect) {
+    private func addGloss(to rect: NSRect, radius: CGFloat) {
         let glossRect = NSRect(x: rect.minX, y: rect.midY, width: rect.width, height: rect.height / 2)
-        let clip = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        let clip = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
         NSGraphicsContext.current?.saveGraphicsState()
         clip.addClip()
         NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.30),

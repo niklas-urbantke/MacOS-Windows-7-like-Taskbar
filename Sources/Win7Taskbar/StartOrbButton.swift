@@ -15,12 +15,13 @@ final class StartOrbButton: NSControl {
     private var phase: CGFloat = 0          // free-running phase for the pulse
     private var anim: Timer?
 
-    private let orbImage: NSImage? = {
-        if let url = Bundle.main.url(forResource: "orb", withExtension: "png") {
-            return NSImage(contentsOf: url)
-        }
-        return nil
-    }()
+    private var orbImage: NSImage? = OrbCatalog.selectedURL.flatMap { NSImage(contentsOf: $0) }
+
+    /// Reload after the user picks a different orb in settings.
+    func reloadOrb() {
+        orbImage = OrbCatalog.selectedURL.flatMap { NSImage(contentsOf: $0) }
+        needsDisplay = true
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

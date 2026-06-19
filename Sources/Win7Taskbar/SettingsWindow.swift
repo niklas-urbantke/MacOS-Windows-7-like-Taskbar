@@ -12,6 +12,10 @@ final class SettingsWindowController: NSObject {
     private let wifiBox = NSButton(checkboxWithTitle: "WLAN-Symbol anzeigen", target: nil, action: nil)
     private let monitorBox = NSButton(checkboxWithTitle: "Hardware-Monitor (CPU/RAM) anzeigen", target: nil, action: nil)
     private let autostartBox = NSButton(checkboxWithTitle: "Beim Anmelden automatisch starten", target: nil, action: nil)
+    private let finderDesktopBox = NSButton(checkboxWithTitle: "Finder-Desktopfenster nicht als Fenster zählen", target: nil, action: nil)
+    private let fullHeightBox = NSButton(checkboxWithTitle: "Icon-Rahmen über volle Höhe", target: nil, action: nil)
+    private let orbPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var orbs: [(label: String, file: String)] = []
 
     func show() {
         if window == nil { build() }
@@ -22,38 +26,71 @@ final class SettingsWindowController: NSObject {
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 340),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 470, height: 280),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Windows 7 Taskleiste – Einstellungen"
         w.isReleasedWhenClosed = false
 
-        let title = NSTextField(labelWithString: "Einstellungen")
-        title.font = NSFont.boldSystemFont(ofSize: 15)
+        // Start-orb selection.
+        orbs = controller?.availableOrbs ?? []
+        orbPopup.removeAllItems()
+        orbPopup.addItems(withTitles: orbs.map { $0.label })
+        orbPopup.target = self
+        orbPopup.action = #selector(orbChanged)
+        let orbRow = NSStackView(views: [NSTextField(labelWithString: "Start-Symbol:"), orbPopup])
+        orbRow.orientation = .horizontal
+        orbRow.spacing = 8
 
-        let boxes = [dockBox, reserveBox, finderBox, nowPlayingBox, wifiBox, monitorBox, autostartBox]
-        for box in boxes {
+        for box in [dockBox, reserveBox, finderBox, finderDesktopBox, nowPlayingBox,
+                    wifiBox, monitorBox, autostartBox, fullHeightBox] {
             box.target = self
             box.action = #selector(changed(_:))
         }
 
+        // Categorised tabs.
+        let tabView = NSTabView()
+        tabView.translatesAutoresizingMaskIntoConstraints = false
+        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox]))
+        tabView.addTabViewItem(makeTab("Darstellung", [orbRow, fullHeightBox]))
+        tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox]))
+        tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox]))
+
         let quit = NSButton(title: "Taskleiste beenden", target: self, action: #selector(quitAction))
         quit.bezelStyle = .rounded
+        quit.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [title] + boxes + [quit])
+        let content = NSView()
+        content.addSubview(tabView)
+        content.addSubview(quit)
+        NSLayoutConstraint.activate([
+            tabView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            tabView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            tabView.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
+            quit.topAnchor.constraint(equalTo: tabView.bottomAnchor, constant: 14),
+            quit.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            quit.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+        ])
+        w.contentView = content
+        window = w
+    }
+
+    private func makeTab(_ title: String, _ views: [NSView]) -> NSTabViewItem {
+        let item = NSTabViewItem(identifier: title)
+        item.label = title
+        let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
-
-        let content = NSView()
-        content.addSubview(stack)
+        let v = NSView()
+        v.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: v.topAnchor, constant: 16),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: v.trailingAnchor, constant: -16),
         ])
-        w.contentView = content
-        window = w
+        item.view = v
+        return item
     }
 
     private func syncFromController() {
@@ -65,6 +102,17 @@ final class SettingsWindowController: NSObject {
         wifiBox.state = c.wifiEnabled ? .on : .off
         monitorBox.state = c.monitorEnabled ? .on : .off
         autostartBox.state = c.autostartEnabled ? .on : .off
+        finderDesktopBox.state = c.hideFinderDesktopEnabled ? .on : .off
+        fullHeightBox.state = c.fullHeightIcons ? .on : .off
+        if let idx = orbs.firstIndex(where: { $0.file == c.selectedOrbFile }) {
+            orbPopup.selectItem(at: idx)
+        }
+    }
+
+    @objc private func orbChanged() {
+        guard let c = controller, orbPopup.indexOfSelectedItem >= 0,
+              orbPopup.indexOfSelectedItem < orbs.count else { return }
+        c.setOrb(orbs[orbPopup.indexOfSelectedItem].file)
     }
 
     @objc private func changed(_ sender: NSButton) {
@@ -96,6 +144,10 @@ final class SettingsWindowController: NSObject {
             c.setShowMonitor(on)
         case autostartBox:
             c.setAutostart(on)
+        case finderDesktopBox:
+            c.setHideFinderDesktop(on)
+        case fullHeightBox:
+            c.setFullHeightIcons(on)
         default:
             break
         }
