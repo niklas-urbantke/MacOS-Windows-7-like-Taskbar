@@ -700,11 +700,21 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     }
 
     @objc private func updateBarVisibility() {
+        // Toggle visibility via alpha (not orderOut/orderFront) so the window keeps its level,
+        // position and all-Spaces membership and reliably reappears after full screen.
         let fullscreen = isFullscreenActive()
-        if fullscreen && window.isVisible {
-            window.orderOut(nil)
-        } else if !fullscreen && !window.isVisible {
-            window.orderFront(nil)
+        window.ignoresMouseEvents = fullscreen
+        let target: CGFloat = fullscreen ? 0 : 1
+        if window.alphaValue != target { window.alphaValue = target }
+        if !fullscreen && !window.isVisible { window.orderFront(nil) }
+
+        // The Space transition can briefly still report full screen; re-check shortly after.
+        if !fullscreen { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, !self.isFullscreenActive() else { return }
+            self.window.ignoresMouseEvents = false
+            self.window.alphaValue = 1
+            if !self.window.isVisible { self.window.orderFront(nil) }
         }
     }
 
