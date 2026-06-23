@@ -224,7 +224,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         buttons.forEach { $0.removeFromSuperview() }
         buttons.removeAll()
 
-        let startX = Theme.orbWidth + 14   // Abstand zwischen Orb und erstem Icon
+        let startX = Theme.orbWidth + 4   // Abstand zwischen Orb und erstem Icon
         let endX = trayLeftX - 6
         let available = max(0, endX - startX)
         guard !items.isEmpty, available > 0 else { return }

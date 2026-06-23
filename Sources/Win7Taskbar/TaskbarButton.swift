@@ -144,10 +144,31 @@ final class TaskbarButton: NSControl {
         let running = item.isRunning && !finderDesktopOnly
         let active = item.isActive && !finderDesktopOnly
 
+        // The front slot rect (shrinks horizontally when several windows are stacked).
+        var frontBox = inset
         if win7 {
             // Authentic Windows 7 button glass: the original state PNGs as 9-slice backgrounds.
             if let bg = win7Background(active: active, running: running) {
-                bg.draw(in: inset, from: .zero, operation: .sourceOver, fraction: 1)
+                // "Stacked" look: extra windows add sheets stepping to the RIGHT only. The left side
+                // stays flush (no offset) and each sheet is clipped to its own, non-overlapping strip
+                // so the translucent glass never stacks (no extra opacity). Stays within the box width.
+                let layers = min(max(item.windowCount, 1), 3)
+                let extra = layers - 1
+                let step: CGFloat = 5
+                let sheetW = inset.width - CGFloat(extra) * step
+                for j in 0...extra {
+                    let sheetRect = NSRect(x: inset.minX + CGFloat(j) * step, y: inset.minY,
+                                           width: sheetW, height: inset.height)
+                    let clipMinX = inset.minX + sheetW + CGFloat(max(j - 1, 0)) * step
+                    let clipMaxX = inset.minX + sheetW + CGFloat(j) * step
+                    let clip = NSRect(x: j == 0 ? inset.minX : clipMinX, y: inset.minY,
+                                      width: (j == 0 ? sheetW : clipMaxX - clipMinX), height: inset.height)
+                    NSGraphicsContext.current?.saveGraphicsState()
+                    NSBezierPath(rect: clip).addClip()
+                    bg.draw(in: sheetRect, from: .zero, operation: .sourceOver, fraction: 1)
+                    NSGraphicsContext.current?.restoreGraphicsState()
+                }
+                frontBox = NSRect(x: inset.minX, y: inset.minY, width: sheetW, height: inset.height)
             }
         } else if active {
             // Glassy translucent highlight for the active app (no colour tint, just lifted glass).
@@ -170,7 +191,7 @@ final class TaskbarButton: NSControl {
         // Icon only — centred, no label (Win7 "small/combine" taskbar mode).
         // Slightly smaller icons in the Windows 7 theme so they sit nicely inside the full-height slot.
         let iconS = win7 ? (Theme.iconSize * 0.85).rounded() : Theme.iconSize
-        let iconRect = NSRect(x: (bounds.width - iconS) / 2,
+        let iconRect = NSRect(x: frontBox.midX - iconS / 2,
                               y: (bounds.height - iconS) / 2,
                               width: iconS, height: iconS)
         item.icon.draw(in: iconRect,
