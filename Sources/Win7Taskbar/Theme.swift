@@ -49,6 +49,8 @@ enum Theme {
         guard let v = UserDefaults.standard.object(forKey: key) as? Double else { return fallback }
         return CGFloat(min(1.0, max(0.0, v)))
     }
+    /// Multiplier (0…1) for the Windows 7 icon-slot glass strength (1.0 = full).
+    static var win7GlassStrength: CGFloat { clamped01("win7GlassStrength", 1.0) }
     static var taskbarBlur: CGFloat { clamped01("taskbarBlur", defaultTaskbarBlur) }
     static var taskbarOpacity: CGFloat { clamped01("taskbarOpacity", defaultTaskbarOpacity) }
     static var menuBlur: CGFloat { clamped01("menuBlur", defaultMenuBlur) }

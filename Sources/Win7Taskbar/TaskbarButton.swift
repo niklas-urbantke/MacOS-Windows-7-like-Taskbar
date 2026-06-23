@@ -152,6 +152,9 @@ final class TaskbarButton: NSControl {
                 // "Stacked" look: extra windows add sheets stepping to the RIGHT only. The left side
                 // stays flush (no offset) and each sheet is clipped to its own, non-overlapping strip
                 // so the translucent glass never stacks (no extra opacity). Stays within the box width.
+                // Glass strength from settings: 100 % = original full slot opacity (the PNGs already
+                // make the active app brighter than running-inactive ones); lower = more transparent.
+                let glass = Theme.win7GlassStrength
                 let layers = min(max(item.windowCount, 1), 3)
                 let extra = layers - 1
                 let step: CGFloat = 5
@@ -165,7 +168,7 @@ final class TaskbarButton: NSControl {
                                       width: (j == 0 ? sheetW : clipMaxX - clipMinX), height: inset.height)
                     NSGraphicsContext.current?.saveGraphicsState()
                     NSBezierPath(rect: clip).addClip()
-                    bg.draw(in: sheetRect, from: .zero, operation: .sourceOver, fraction: 1)
+                    bg.draw(in: sheetRect, from: .zero, operation: .sourceOver, fraction: glass)
                     NSGraphicsContext.current?.restoreGraphicsState()
                 }
                 frontBox = NSRect(x: inset.minX, y: inset.minY, width: sheetW, height: inset.height)

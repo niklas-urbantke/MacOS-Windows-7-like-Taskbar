@@ -561,6 +561,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         glass.subviews.forEach { $0.needsDisplay = true }
     }
 
+    // Win7-Icon-Glas-Stärke (0…1).
+    var win7GlassStrength: CGFloat { Theme.win7GlassStrength }
+    func setWin7GlassStrength(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "win7GlassStrength")
+        buttons.forEach { $0.needsDisplay = true }
+    }
+
     // Transparenz / Unschärfe der Taskleiste (jeweils 0…1).
     var taskbarBlur: CGFloat { Theme.taskbarBlur }
     var taskbarOpacity: CGFloat { Theme.taskbarOpacity }

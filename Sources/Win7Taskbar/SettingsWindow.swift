@@ -31,6 +31,8 @@ final class SettingsWindowController: NSObject {
     private let taskbarOpacityLabel = NSTextField(labelWithString: "")
     private let taskbarBlurSlider = NSSlider(frame: .zero)
     private let taskbarBlurLabel = NSTextField(labelWithString: "")
+    private let win7GlassSlider = NSSlider(frame: .zero)
+    private let win7GlassLabel = NSTextField(labelWithString: "")
     private let menuOpacitySlider = NSSlider(frame: .zero)
     private let menuOpacityLabel = NSTextField(labelWithString: "")
     private let menuBlurSlider = NSSlider(frame: .zero)
@@ -99,6 +101,8 @@ final class SettingsWindowController: NSObject {
                                           #selector(taskbarOpacityChanged))
         let tbBlurRow = makeSurfaceRow("Unschärfe:", taskbarBlurSlider, taskbarBlurLabel,
                                        #selector(taskbarBlurChanged))
+        let tbGlassRow = makeSurfaceRow("Icon-Glas:", win7GlassSlider, win7GlassLabel,
+                                        #selector(win7GlassChanged))
         let menuOpacityRow = makeSurfaceRow("Deckkraft:", menuOpacitySlider, menuOpacityLabel,
                                             #selector(menuOpacityChanged))
         let menuBlurRow = makeSurfaceRow("Unschärfe:", menuBlurSlider, menuBlurLabel,
@@ -120,7 +124,7 @@ final class SettingsWindowController: NSObject {
         tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox]))
         tabView.addTabViewItem(makeTab("Darstellung", [orbRow, styleRow, heightRow, fullHeightBox]))
         tabView.addTabViewItem(makeTab("Transparenz",
-                                       [tbHeader, tbStyleRow, tbOpacityRow, tbBlurRow,
+                                       [tbHeader, tbStyleRow, tbOpacityRow, tbBlurRow, tbGlassRow,
                                         menuHeader, menuOpacityRow, menuBlurRow]))
         tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox]))
         tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox]))
@@ -193,6 +197,10 @@ final class SettingsWindowController: NSObject {
         controller?.setTaskbarBlur(CGFloat(taskbarBlurSlider.doubleValue))
         taskbarBlurLabel.stringValue = percent(taskbarBlurSlider.doubleValue)
     }
+    @objc private func win7GlassChanged() {
+        controller?.setWin7GlassStrength(CGFloat(win7GlassSlider.doubleValue))
+        win7GlassLabel.stringValue = percent(win7GlassSlider.doubleValue)
+    }
     @objc private func menuOpacityChanged() {
         controller?.setMenuOpacity(CGFloat(menuOpacitySlider.doubleValue))
         menuOpacityLabel.stringValue = percent(menuOpacitySlider.doubleValue)
@@ -231,6 +239,8 @@ final class SettingsWindowController: NSObject {
         taskbarOpacityLabel.stringValue = percent(Double(c.taskbarOpacity))
         taskbarBlurSlider.doubleValue = Double(c.taskbarBlur)
         taskbarBlurLabel.stringValue = percent(Double(c.taskbarBlur))
+        win7GlassSlider.doubleValue = Double(c.win7GlassStrength)
+        win7GlassLabel.stringValue = percent(Double(c.win7GlassStrength))
         menuOpacitySlider.doubleValue = Double(c.menuOpacity)
         menuOpacityLabel.stringValue = percent(Double(c.menuOpacity))
         menuBlurSlider.doubleValue = Double(c.menuBlur)
