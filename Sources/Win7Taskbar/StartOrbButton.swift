@@ -27,7 +27,7 @@ final class StartOrbButton: NSControl {
         return (n, h, p)
     }()
 
-    /// Reload after the user picks a different orb in settings.
+    /// Reload after the user picks a different orb in settings (or the theme changes).
     func reloadOrb() {
         orbImage = OrbCatalog.selectedURL.flatMap { NSImage(contentsOf: $0) }
         needsDisplay = true
@@ -82,8 +82,8 @@ final class StartOrbButton: NSControl {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        // Windows 7 theme: crossfade the original orb PNGs (normal → hover → menu-open).
-        if Theme.taskbarStyle == .win7, let orbs = win7Orbs {
+        // Original Windows 7 orb selected: crossfade the three state PNGs (normal → hover → menu-open).
+        if OrbCatalog.selectedFile == OrbCatalog.win7Token, let orbs = win7Orbs {
             let d = bounds.height * 1.34
             let rect = NSRect(x: (bounds.width - d) / 2, y: (bounds.height - d) / 2, width: d, height: d)
             orbs.normal.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)

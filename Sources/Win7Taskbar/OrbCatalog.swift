@@ -8,6 +8,10 @@ import AppKit
 enum OrbCatalog {
     struct Orb { let label: String; let file: String; let url: URL }
 
+    /// Sentinel for the original three-state Windows 7 orb (orbNormal/Hover/Pressed in the theme).
+    /// It isn't a single PNG, so it's rendered specially by StartOrbButton.
+    static let win7Token = "__win7orb__"
+
     /// User-writable orbs folder (created on demand).
     static var userDir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -19,6 +23,10 @@ enum OrbCatalog {
     static func available() -> [Orb] {
         var seen = Set<String>()
         var result: [Orb] = []
+        // Synthetic entry for the original Windows 7 orb (three separate state PNGs in the theme).
+        if let url = Bundle.main.url(forResource: "orbNormal", withExtension: "png", subdirectory: "theme") {
+            result.append(Orb(label: "Windows 7 (Original)", file: win7Token, url: url))
+        }
         func scan(_ dir: URL?) {
             guard let dir,
                   let files = try? FileManager.default.contentsOfDirectory(
@@ -44,9 +52,14 @@ enum OrbCatalog {
             .capitalized
     }
 
-    static var selectedFile: String { UserDefaults.standard.string(forKey: "orbFile") ?? "orb.png" }
+    static var selectedFile: String {
+        if let f = UserDefaults.standard.string(forKey: "orbFile") { return f }
+        // No explicit choice yet: default to the original orb in the Win7 theme, else orb.png.
+        return Theme.taskbarStyle == .win7 ? win7Token : "orb.png"
+    }
 
     static var selectedURL: URL? {
+        if selectedFile == win7Token { return nil }   // rendered specially, not as a flat image
         let all = available()
         return all.first(where: { $0.file == selectedFile })?.url
             ?? all.first(where: { $0.file == "orb.png" })?.url

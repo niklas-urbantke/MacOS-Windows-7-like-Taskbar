@@ -235,12 +235,15 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         buttonStartX = startX
         buttonPitch = min(ideal, available / count)
         buttonW = buttonPitch - Theme.buttonSpacing
-        buttonY = (Theme.barHeight - Theme.buttonHeight) / 2
+        // Windows 7 slots span the full bar height; Vista keeps the centred button height.
+        let win7 = Theme.taskbarStyle == .win7
+        let buttonH = win7 ? Theme.barHeight : Theme.buttonHeight
+        buttonY = win7 ? 0 : (Theme.barHeight - Theme.buttonHeight) / 2
 
         for (i, item) in items.enumerated() {
             let b = TaskbarButton(item: item)
             b.buttonDelegate = self
-            b.frame = NSRect(x: slotX(i), y: buttonY, width: buttonW, height: Theme.buttonHeight)
+            b.frame = NSRect(x: slotX(i), y: buttonY, width: buttonW, height: buttonH)
             glass.addSubview(b)
             buttons.append(b)
         }
@@ -544,7 +547,18 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         UserDefaults.standard.set(Double(Theme.defaultBlur(for: style)), forKey: "taskbarBlur")
         UserDefaults.standard.set(Double(Theme.defaultOpacity(for: style)), forKey: "taskbarOpacity")
         applyAppearance()
+        reloadEverything()
+    }
+
+    /// Full visual reload — rebuild the button row and redraw all chrome (used on theme switch).
+    private func reloadEverything() {
         glass.needsDisplay = true
+        orb.reloadOrb()
+        orb.needsDisplay = true
+        showDesktop.needsDisplay = true
+        layoutTray()        // relays out tray + buttons (button height depends on the theme)
+        rebuildItems()      // recreate the taskbar buttons fresh
+        glass.subviews.forEach { $0.needsDisplay = true }
     }
 
     // Transparenz / Unschärfe der Taskleiste (jeweils 0…1).
