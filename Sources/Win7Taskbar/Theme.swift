@@ -26,7 +26,7 @@ enum Theme {
     static var buttonSpacing: CGFloat { s(2) }
     static var iconSize: CGFloat { s(56) }
     static var clockWidth: CGFloat { s(92) }
-    static var showDesktopWidth: CGFloat { s(26) }
+    static var showDesktopWidth: CGFloat { s(23) }
 
     // Taskleisten-Stil-Profil (Glas-Optik + empfohlene Blur-/Deckkraftwerte).
     enum TaskbarStyle: String { case vista, win7 }
