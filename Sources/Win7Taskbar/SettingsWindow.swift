@@ -22,6 +22,20 @@ final class SettingsWindowController: NSObject {
     private let heightSlider = NSSlider(frame: .zero)
     private let heightLabel = NSTextField(labelWithString: "")
 
+    // Taskleisten-Stil-Profil.
+    private let taskbarStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let taskbarStyles: [(label: String, value: String)] = [("Windows Vista", "vista"), ("Windows 7", "win7")]
+
+    // Transparenz / Unschärfe (getrennt für Taskleiste und Startmenü).
+    private let taskbarOpacitySlider = NSSlider(frame: .zero)
+    private let taskbarOpacityLabel = NSTextField(labelWithString: "")
+    private let taskbarBlurSlider = NSSlider(frame: .zero)
+    private let taskbarBlurLabel = NSTextField(labelWithString: "")
+    private let menuOpacitySlider = NSSlider(frame: .zero)
+    private let menuOpacityLabel = NSTextField(labelWithString: "")
+    private let menuBlurSlider = NSSlider(frame: .zero)
+    private let menuBlurLabel = NSTextField(labelWithString: "")
+
     func show() {
         if window == nil { build() }
         reloadOrbPopup()        // pick up orbs added/dropped since last time
@@ -32,7 +46,7 @@ final class SettingsWindowController: NSObject {
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 290),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 330),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Windows 7 Taskleiste – Einstellungen"
         w.isReleasedWhenClosed = false
@@ -55,7 +69,9 @@ final class SettingsWindowController: NSObject {
         menuStylePopup.addItems(withTitles: menuStyles.map { $0.label })
         menuStylePopup.target = self
         menuStylePopup.action = #selector(menuStyleChanged)
-        let styleRow = NSStackView(views: [NSTextField(labelWithString: "Startmenü-Stil:"), menuStylePopup])
+        let menuEditButton = NSButton(title: "Rechte Spalte bearbeiten…", target: self, action: #selector(openMenuEditor))
+        menuEditButton.bezelStyle = .rounded
+        let styleRow = NSStackView(views: [NSTextField(labelWithString: "Startmenü-Stil:"), menuStylePopup, menuEditButton])
         styleRow.orientation = .horizontal
         styleRow.spacing = 8
 
@@ -69,6 +85,29 @@ final class SettingsWindowController: NSObject {
         heightRow.orientation = .horizontal
         heightRow.spacing = 8
 
+        // Taskleisten-Stil-Profil.
+        taskbarStylePopup.removeAllItems()
+        taskbarStylePopup.addItems(withTitles: taskbarStyles.map { $0.label })
+        taskbarStylePopup.target = self
+        taskbarStylePopup.action = #selector(taskbarStyleChanged)
+        let tbStyleRow = NSStackView(views: [NSTextField(labelWithString: "Stil-Profil:"), taskbarStylePopup])
+        tbStyleRow.orientation = .horizontal
+        tbStyleRow.spacing = 8
+
+        // Transparenz / Unschärfe – je ein Regler (0–100 %) für Taskleiste und Startmenü.
+        let tbOpacityRow = makeSurfaceRow("Deckkraft:", taskbarOpacitySlider, taskbarOpacityLabel,
+                                          #selector(taskbarOpacityChanged))
+        let tbBlurRow = makeSurfaceRow("Unschärfe:", taskbarBlurSlider, taskbarBlurLabel,
+                                       #selector(taskbarBlurChanged))
+        let menuOpacityRow = makeSurfaceRow("Deckkraft:", menuOpacitySlider, menuOpacityLabel,
+                                            #selector(menuOpacityChanged))
+        let menuBlurRow = makeSurfaceRow("Unschärfe:", menuBlurSlider, menuBlurLabel,
+                                         #selector(menuBlurChanged))
+        let tbHeader = NSTextField(labelWithString: "Taskleiste")
+        tbHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let menuHeader = NSTextField(labelWithString: "Startmenü")
+        menuHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+
         for box in [dockBox, reserveBox, finderBox, finderDesktopBox, nowPlayingBox,
                     wifiBox, monitorBox, autostartBox, fullHeightBox] {
             box.target = self
@@ -80,6 +119,9 @@ final class SettingsWindowController: NSObject {
         tabView.translatesAutoresizingMaskIntoConstraints = false
         tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox]))
         tabView.addTabViewItem(makeTab("Darstellung", [orbRow, styleRow, heightRow, fullHeightBox]))
+        tabView.addTabViewItem(makeTab("Transparenz",
+                                       [tbHeader, tbStyleRow, tbOpacityRow, tbBlurRow,
+                                        menuHeader, menuOpacityRow, menuBlurRow]))
         tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox]))
         tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox]))
 
@@ -121,6 +163,45 @@ final class SettingsWindowController: NSObject {
         return item
     }
 
+    private func makeSurfaceRow(_ title: String, _ slider: NSSlider,
+                                _ valueLabel: NSTextField, _ action: Selector) -> NSStackView {
+        slider.minValue = 0
+        slider.maxValue = 1
+        slider.isContinuous = true        // Vorschau in Echtzeit (nur alphaValue, günstig)
+        slider.target = self
+        slider.action = action
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        let label = NSTextField(labelWithString: title)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.widthAnchor.constraint(equalToConstant: 70).isActive = true
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        let row = NSStackView(views: [label, slider, valueLabel])
+        row.orientation = .horizontal
+        row.spacing = 8
+        return row
+    }
+
+    private func percent(_ v: Double) -> String { "\(Int((v * 100).rounded())) %" }
+
+    @objc private func taskbarOpacityChanged() {
+        controller?.setTaskbarOpacity(CGFloat(taskbarOpacitySlider.doubleValue))
+        taskbarOpacityLabel.stringValue = percent(taskbarOpacitySlider.doubleValue)
+    }
+    @objc private func taskbarBlurChanged() {
+        controller?.setTaskbarBlur(CGFloat(taskbarBlurSlider.doubleValue))
+        taskbarBlurLabel.stringValue = percent(taskbarBlurSlider.doubleValue)
+    }
+    @objc private func menuOpacityChanged() {
+        controller?.setMenuOpacity(CGFloat(menuOpacitySlider.doubleValue))
+        menuOpacityLabel.stringValue = percent(menuOpacitySlider.doubleValue)
+    }
+    @objc private func menuBlurChanged() {
+        controller?.setMenuBlur(CGFloat(menuBlurSlider.doubleValue))
+        menuBlurLabel.stringValue = percent(menuBlurSlider.doubleValue)
+    }
+
     private func syncFromController() {
         guard let c = controller else { return }
         dockBox.state = c.dockIsHidden ? .on : .off
@@ -142,6 +223,18 @@ final class SettingsWindowController: NSObject {
         heightSlider.maxValue = Double(c.maxBarHeight)
         heightSlider.doubleValue = Double(c.barHeightValue)
         heightLabel.stringValue = "\(Int(c.barHeightValue)) px"
+
+        if let idx = taskbarStyles.firstIndex(where: { $0.value == c.taskbarStyle }) {
+            taskbarStylePopup.selectItem(at: idx)
+        }
+        taskbarOpacitySlider.doubleValue = Double(c.taskbarOpacity)
+        taskbarOpacityLabel.stringValue = percent(Double(c.taskbarOpacity))
+        taskbarBlurSlider.doubleValue = Double(c.taskbarBlur)
+        taskbarBlurLabel.stringValue = percent(Double(c.taskbarBlur))
+        menuOpacitySlider.doubleValue = Double(c.menuOpacity)
+        menuOpacityLabel.stringValue = percent(Double(c.menuOpacity))
+        menuBlurSlider.doubleValue = Double(c.menuBlur)
+        menuBlurLabel.stringValue = percent(Double(c.menuBlur))
     }
 
     @objc private func heightChanged() {
@@ -165,6 +258,15 @@ final class SettingsWindowController: NSObject {
             orbPopup.selectItem(at: idx)
         }
     }
+
+    @objc private func taskbarStyleChanged() {
+        let i = taskbarStylePopup.indexOfSelectedItem
+        guard i >= 0, i < taskbarStyles.count else { return }
+        controller?.setTaskbarStyle(taskbarStyles[i].value)
+        syncFromController()   // das Profil ändert die empfohlenen Blur-/Deckkraftwerte
+    }
+
+    @objc private func openMenuEditor() { controller?.openMenuEditor() }
 
     @objc private func menuStyleChanged() {
         let i = menuStylePopup.indexOfSelectedItem

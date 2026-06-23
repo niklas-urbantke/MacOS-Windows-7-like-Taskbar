@@ -52,6 +52,22 @@ final class GlassBackgroundView: NSView {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        switch Theme.taskbarStyle {
+        case .vista: drawVista()
+        case .win7:  drawWin7()
+        }
+
+        // Highlight while an app is dragged over the bar.
+        if dragActive {
+            Theme.accent(brightness: 1.3, alpha: 0.22).setFill()
+            bounds.fill()
+            Theme.accent(brightness: 1.3, alpha: 0.9).setStroke()
+            let p = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
+        }
+    }
+
+    /// Original dark Aero strip (Windows Vista profile).
+    private func drawVista() {
         let h = bounds.height
 
         let body = NSGradient(colors: [
@@ -63,24 +79,23 @@ final class GlassBackgroundView: NSView {
         body?.draw(in: bounds, angle: -90)
 
         let glossRect = NSRect(x: 0, y: h * 0.55, width: bounds.width, height: h * 0.45)
-        let gloss = NSGradient(colors: [
+        NSGradient(colors: [
             NSColor(calibratedWhite: 1.0, alpha: 0.28),
             NSColor(calibratedWhite: 1.0, alpha: 0.02),
-        ])
-        gloss?.draw(in: glossRect, angle: -90)
+        ])?.draw(in: glossRect, angle: -90)
 
         // Bright top hairline.
         NSColor(calibratedWhite: 1.0, alpha: 0.45).setFill()
         NSRect(x: 0, y: h - 1, width: bounds.width, height: 1).fill()
         NSColor(calibratedWhite: 1.0, alpha: 0.12).setFill()
         NSRect(x: 0, y: h - 2, width: bounds.width, height: 1).fill()
+    }
 
-        // Highlight while an app is dragged over the bar.
-        if dragActive {
-            Theme.accent(brightness: 1.3, alpha: 0.22).setFill()
-            bounds.fill()
-            Theme.accent(brightness: 1.3, alpha: 0.9).setStroke()
-            let p = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
-        }
+    /// Windows 7 profile: draw the original taskbar texture stretched to fill the bar.
+    private func drawWin7() {
+        guard let tex = ThemeAssets.image("taskbarBackground") else { return }
+        NSGraphicsContext.current?.imageInterpolation = .high
+        // The view's alphaValue already applies `taskbarOpacity`, so draw the texture fully.
+        tex.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1.0)
     }
 }

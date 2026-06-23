@@ -28,6 +28,32 @@ enum Theme {
     static var clockWidth: CGFloat { s(92) }
     static var showDesktopWidth: CGFloat { s(16) }
 
+    // Taskleisten-Stil-Profil (Glas-Optik + empfohlene Blur-/Deckkraftwerte).
+    enum TaskbarStyle: String { case vista, win7 }
+    static var taskbarStyle: TaskbarStyle {
+        TaskbarStyle(rawValue: UserDefaults.standard.string(forKey: "taskbarStyle") ?? "vista") ?? .vista
+    }
+    // Win7 uses a translucent texture overlay, so it carries its own transparency → opacity 1.0.
+    static func defaultBlur(for s: TaskbarStyle) -> CGFloat { s == .win7 ? 0.55 : 0.55 }
+    static func defaultOpacity(for s: TaskbarStyle) -> CGFloat { 1.0 }
+
+    // Transparenz / Unschärfe (getrennt für Taskleiste und Startmenü), jeweils 0…1.
+    // "Blur" steuert die Deckkraft der Frost-Schicht (NSVisualEffectView),
+    // "Opacity" die Deckkraft der dunklen Glas-Tönung darüber.
+    static let defaultTaskbarBlur: CGFloat = 0.55
+    static let defaultTaskbarOpacity: CGFloat = 1.0
+    static let defaultMenuBlur: CGFloat = 0.45
+    static let defaultMenuOpacity: CGFloat = 1.0
+
+    private static func clamped01(_ key: String, _ fallback: CGFloat) -> CGFloat {
+        guard let v = UserDefaults.standard.object(forKey: key) as? Double else { return fallback }
+        return CGFloat(min(1.0, max(0.0, v)))
+    }
+    static var taskbarBlur: CGFloat { clamped01("taskbarBlur", defaultTaskbarBlur) }
+    static var taskbarOpacity: CGFloat { clamped01("taskbarOpacity", defaultTaskbarOpacity) }
+    static var menuBlur: CGFloat { clamped01("menuBlur", defaultMenuBlur) }
+    static var menuOpacity: CGFloat { clamped01("menuOpacity", defaultMenuOpacity) }
+
     // Aero glass colours (drawn on top of a dark NSVisualEffectView).
     static let glassTop = NSColor(calibratedWhite: 0.30, alpha: 0.55)
     static let glassBottom = NSColor(calibratedWhite: 0.04, alpha: 0.72)

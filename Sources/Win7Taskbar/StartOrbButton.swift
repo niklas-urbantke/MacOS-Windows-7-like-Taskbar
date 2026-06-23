@@ -19,6 +19,14 @@ final class StartOrbButton: NSControl {
 
     private var orbImage: NSImage? = OrbCatalog.selectedURL.flatMap { NSImage(contentsOf: $0) }
 
+    /// The original Windows 7 orb in its three states (used by the Windows 7 theme).
+    private let win7Orbs: (normal: NSImage, hover: NSImage, pressed: NSImage)? = {
+        guard let n = ThemeAssets.image("orbNormal"),
+              let h = ThemeAssets.image("orbHover"),
+              let p = ThemeAssets.image("orbPressed") else { return nil }
+        return (n, h, p)
+    }()
+
     /// Reload after the user picks a different orb in settings.
     func reloadOrb() {
         orbImage = OrbCatalog.selectedURL.flatMap { NSImage(contentsOf: $0) }
@@ -74,6 +82,16 @@ final class StartOrbButton: NSControl {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        // Windows 7 theme: crossfade the original orb PNGs (normal → hover → menu-open).
+        if Theme.taskbarStyle == .win7, let orbs = win7Orbs {
+            let d = bounds.height * 1.34
+            let rect = NSRect(x: (bounds.width - d) / 2, y: (bounds.height - d) / 2, width: d, height: d)
+            orbs.normal.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            if glow > 0.001 { orbs.hover.draw(in: rect, from: .zero, operation: .sourceOver, fraction: glow) }
+            if press > 0.001 { orbs.pressed.draw(in: rect, from: .zero, operation: .sourceOver, fraction: press) }
+            return
+        }
+
         // The orb art sits inside transparent padding, so we crop to the content and let it
         // fill the bar height (overflowing slightly into the clipped glow margin).
         let base = orbImage != nil ? bounds.height * 1.18 - 3 : min(bounds.width - 4, bounds.height - 2)

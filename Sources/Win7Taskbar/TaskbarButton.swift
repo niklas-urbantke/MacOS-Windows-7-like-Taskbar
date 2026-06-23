@@ -132,7 +132,9 @@ final class TaskbarButton: NSControl {
 
     override func draw(_ dirtyRect: NSRect) {
         // Option: button frames spanning the full bar height (top to bottom).
-        let full = UserDefaults.standard.bool(forKey: "fullHeightIcons")
+        // The Windows 7 theme always uses full-height slots.
+        let win7 = Theme.taskbarStyle == .win7
+        let full = win7 || UserDefaults.standard.bool(forKey: "fullHeightIcons")
         let inset = full ? bounds.insetBy(dx: 1, dy: 0) : bounds.insetBy(dx: 2, dy: 4)
         let radius: CGFloat = full ? 2 : 5
         let path = NSBezierPath(roundedRect: inset, xRadius: radius, yRadius: radius)
@@ -142,7 +144,12 @@ final class TaskbarButton: NSControl {
         let running = item.isRunning && !finderDesktopOnly
         let active = item.isActive && !finderDesktopOnly
 
-        if active {
+        if win7 {
+            // Authentic Windows 7 button glass: the original state PNGs as 9-slice backgrounds.
+            if let bg = win7Background(active: active, running: running) {
+                bg.draw(in: inset, from: .zero, operation: .sourceOver, fraction: 1)
+            }
+        } else if active {
             // Glassy translucent highlight for the active app (no colour tint, just lifted glass).
             NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.46),
                                 NSColor(calibratedWhite: 1, alpha: 0.16)])?.draw(in: path, angle: -90)
@@ -161,9 +168,11 @@ final class TaskbarButton: NSControl {
         }
 
         // Icon only — centred, no label (Win7 "small/combine" taskbar mode).
-        let iconRect = NSRect(x: (bounds.width - Theme.iconSize) / 2,
-                              y: (bounds.height - Theme.iconSize) / 2,
-                              width: Theme.iconSize, height: Theme.iconSize)
+        // Slightly smaller icons in the Windows 7 theme so they sit nicely inside the full-height slot.
+        let iconS = win7 ? (Theme.iconSize * 0.85).rounded() : Theme.iconSize
+        let iconRect = NSRect(x: (bounds.width - iconS) / 2,
+                              y: (bounds.height - iconS) / 2,
+                              width: iconS, height: iconS)
         item.icon.draw(in: iconRect,
                        from: .zero,
                        operation: .sourceOver,
@@ -195,7 +204,7 @@ final class TaskbarButton: NSControl {
         // Win7 "stacked" look for several windows: nested frame edges stepping in from the
         // RIGHT, clipped to the button so the left stays clean and nothing spills onto a
         // neighbour. Outlines only → the glass translucency is unchanged. More windows → narrower.
-        if item.windowCount > 1 {
+        if item.windowCount > 1 && Theme.taskbarStyle != .win7 {
             let extra = min(item.windowCount - 1, 3)
             let spacing: CGFloat = extra <= 1 ? 6 : (extra == 2 ? 5 : 4)
             NSGraphicsContext.current?.saveGraphicsState()
@@ -210,6 +219,19 @@ final class TaskbarButton: NSControl {
             }
             NSGraphicsContext.current?.restoreGraphicsState()
         }
+    }
+
+    /// The original Windows 7 button-slot background for the current state (nil = no background).
+    private func win7Background(active: Bool, running: Bool) -> NSImage? {
+        let name: String?
+        if active {
+            name = "ActiveNormal"
+        } else if running {
+            name = hovering ? "InactivePointerOver" : "InactiveNormal"
+        } else {
+            name = hovering ? "notRunningPointerOver" : nil   // pinned, not running: only on hover
+        }
+        return name.flatMap { ThemeAssets.resizable($0, caps: 8) }
     }
 
     /// Aero gloss: a bright highlight over the top half of the button.

@@ -6,6 +6,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let screen: NSScreen
     private let window: NSWindow
     private let glass = GlassBackgroundView()
+    private let blur = NSVisualEffectView()
     private let orb = StartOrbButton()
     private let clock = ClockView()
     private let battery = BatteryView()
@@ -77,6 +78,9 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         DistributedNotificationCenter.default().addObserver(
             self, selector: #selector(openSettings),
             name: NSNotification.Name("de.batix.win7taskbar.openSettings"), object: nil)
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(openMenuEditorNotif),
+            name: NSNotification.Name("de.batix.win7taskbar.openEditor"), object: nil)
         rebuildItems()
         startClock()
 
@@ -96,18 +100,19 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
         container.autoresizingMask = [.width, .height]
 
-        let blur = NSVisualEffectView(frame: container.bounds)
+        blur.frame = container.bounds
         blur.autoresizingMask = [.width, .height]
         blur.material = .underWindowBackground
         blur.blendingMode = .behindWindow
         blur.state = .active
         blur.appearance = NSAppearance(named: .darkAqua)
-        blur.alphaValue = 0.55   // weniger Blur: Frost-Schicht halbdurchlässig
         container.addSubview(blur)
 
         glass.frame = container.bounds
         glass.autoresizingMask = [.width, .height]
         container.addSubview(glass)
+
+        applyAppearance()
 
         window.contentView = container
     }
@@ -518,6 +523,54 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     var menuStyle: String { UserDefaults.standard.string(forKey: "menuStyle") ?? "accent" }
     func setMenuStyle(_ style: String) { UserDefaults.standard.set(style, forKey: "menuStyle") }
 
+    // Editor für die rechte Spalte des Startmenüs.
+    private var menuEditor: MenuEditorWindowController?
+    @objc private func openMenuEditorNotif() { openMenuEditor() }
+    func openMenuEditor() {
+        if menuEditor == nil {
+            let editor = MenuEditorWindowController()
+            editor.onChange = { [weak self] in self?.startMenu.reloadRightColumn() }
+            menuEditor = editor
+        }
+        menuEditor?.show()
+    }
+
+    // Taskleisten-Stil-Profil: "vista" (dunkles Glas) oder "win7" (helles Aero-Glas).
+    var taskbarStyle: String { Theme.taskbarStyle.rawValue }
+    func setTaskbarStyle(_ raw: String) {
+        UserDefaults.standard.set(raw, forKey: "taskbarStyle")
+        let style = Theme.TaskbarStyle(rawValue: raw) ?? .vista
+        // Apply the profile's recommended blur/opacity (the user can still fine-tune afterwards).
+        UserDefaults.standard.set(Double(Theme.defaultBlur(for: style)), forKey: "taskbarBlur")
+        UserDefaults.standard.set(Double(Theme.defaultOpacity(for: style)), forKey: "taskbarOpacity")
+        applyAppearance()
+        glass.needsDisplay = true
+    }
+
+    // Transparenz / Unschärfe der Taskleiste (jeweils 0…1).
+    var taskbarBlur: CGFloat { Theme.taskbarBlur }
+    var taskbarOpacity: CGFloat { Theme.taskbarOpacity }
+    func setTaskbarBlur(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "taskbarBlur"); applyAppearance()
+    }
+    func setTaskbarOpacity(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "taskbarOpacity"); applyAppearance()
+    }
+    private func applyAppearance() {
+        blur.alphaValue = Theme.taskbarBlur
+        glass.alphaValue = Theme.taskbarOpacity
+    }
+
+    // Transparenz / Unschärfe des Startmenüs (jeweils 0…1) – an das Startmenü weitergereicht.
+    var menuBlur: CGFloat { Theme.menuBlur }
+    var menuOpacity: CGFloat { Theme.menuOpacity }
+    func setMenuBlur(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "menuBlur"); startMenu.applyAppearance()
+    }
+    func setMenuOpacity(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "menuOpacity"); startMenu.applyAppearance()
+    }
+
     // Start-Orb-Auswahl.
     var availableOrbs: [(label: String, file: String)] { OrbCatalog.available().map { ($0.label, $0.file) } }
     var selectedOrbFile: String { OrbCatalog.selectedFile }
@@ -820,6 +873,11 @@ private final class ShowDesktopButton: NSView {
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func draw(_ dirtyRect: NSRect) {
+        if Theme.taskbarStyle == .win7 {
+            let name = hovering ? "desktopPointerOver" : "desktopNormal"
+            ThemeAssets.image(name)?.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
+            return
+        }
         if hovering {
             NSColor(calibratedWhite: 1, alpha: 0.18).setFill()
             bounds.fill()

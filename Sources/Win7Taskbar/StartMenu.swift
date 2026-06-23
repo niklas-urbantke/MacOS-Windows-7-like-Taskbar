@@ -9,6 +9,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private let scrollView = NSScrollView()
     private let searchField = NSTextField()
     private let tint = ColumnTintView(frame: .zero)
+    private let blur = NSVisualEffectView()
     private let avatar = AvatarView(frame: .zero)
     private let listDoc = FlippedView()        // manual-layout document view (fast for long lists)
     private var listY: CGFloat = 0
@@ -44,6 +45,12 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
             name: NSWindow.didResignKeyNotification, object: window)
     }
 
+    /// Transparenz (Tönung) und Unschärfe (Frost-Schicht) aus den Einstellungen anwenden.
+    func applyAppearance() {
+        blur.alphaValue = Theme.menuBlur
+        tint.alphaValue = Theme.menuOpacity
+    }
+
     // MARK: - Layout
 
     private func buildContent() {
@@ -59,18 +66,19 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         root.layer?.borderColor = NSColor(calibratedWhite: 1, alpha: 0.30).cgColor
 
         // Frosted glass background (like the taskbar): blur + semi-transparent column tint.
-        let blur = NSVisualEffectView(frame: root.bounds)
+        blur.frame = root.bounds
         blur.autoresizingMask = [.width, .height]
         blur.material = .underWindowBackground
         blur.blendingMode = .behindWindow
         blur.state = .active
         blur.appearance = NSAppearance(named: .darkAqua)
-        blur.alphaValue = 0.45   // weniger Blur
         root.addSubview(blur)
 
         tint.frame = root.bounds
         tint.autoresizingMask = [.width, .height]
         root.addSubview(tint)
+
+        applyAppearance()
 
         buildLeftColumn()
         buildRightColumn()
@@ -81,6 +89,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         let avatarSize: CGFloat = 99
         avatar.frame = NSRect(x: leftW + (W - leftW - avatarSize) / 2,
                               y: H - avatarSize / 2, width: avatarSize, height: avatarSize)
+        avatar.onClick = { [weak self] in self?.perform(MenuEntryStore.avatarAction()) }
         outer.addSubview(avatar)
 
         window.contentView = outer
@@ -121,38 +130,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         let innerW = (W - leftW) - 38
 
         // (Avatar is added in buildContent so it can overhang the top edge.)
-
-        // Right-column entries (title, gapBefore, bold, action).
-        let user: String = UserDefaults.standard.bool(forKey: "demoMode")
-            ? "Max Mustermann"
-            : (NSFullUserName().isEmpty ? NSUserName() : NSFullUserName())
-        let entries: [(String, Bool, Bool, () -> Void)] = [
-            (user,                 false, true,  { [weak self] in self?.openPath(NSHomeDirectory()) }),
-            ("Dokumente",          true,  false, { [weak self] in self?.openHome("Documents") }),
-            ("Bilder",             false, false, { [weak self] in self?.openHome("Pictures") }),
-            ("Musik",              false, false, { [weak self] in self?.openHome("Music") }),
-            ("Spiele",             true,  false, { [weak self] in self?.openPath("/Applications") }),
-            ("Computer",           false, false, { [weak self] in self?.openURL("file:///") }),
-            ("Systemsteuerung",    true,  false, { [weak self] in self?.openSettings() }),
-            ("Geräte und Drucker", false, false, { [weak self] in self?.openSettings() }),
-            ("Standardprogramme",  false, false, { [weak self] in self?.openSettings() }),
-            ("Hilfe und Support",  false, false, { [weak self] in self?.openURL("https://support.apple.com/de-de") }),
-        ]
-
-        var y: CGFloat = 64
-        for (title, gap, bold, action) in entries {
-            if gap {
-                y += 12
-                // Visual separators between Musik|Spiele and Computer|Systemsteuerung.
-                if title == "Spiele" || title == "Systemsteuerung" {
-                    addSeparator(at: y - 7, x: innerX, width: innerW)
-                }
-            }
-            let row = RightRowButton(title: title, bold: bold, action: action)
-            row.frame = NSRect(x: innerX, y: y, width: innerW, height: 40)
-            root.addSubview(row)
-            y += 40
-        }
+        buildRightEntries()
 
         // Shut-down split button (Windows-7 silver style), bottom-right.
         let shutW: CGFloat = innerW - 30
@@ -167,8 +145,50 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         root.addSubview(arrow)
     }
 
+    /// Rebuild the configurable right-column entries (called on edit). The locked username row
+    /// is always first; the rest come from `MenuEntryStore`.
+    func reloadRightColumn() { buildRightEntries() }
+
+    private var rightEntryViews: [NSView] = []
+
+    private func buildRightEntries() {
+        rightEntryViews.forEach { $0.removeFromSuperview() }
+        rightEntryViews = []
+
+        let innerX = leftW + 20
+        let innerW = (W - leftW) - 38
+
+        // (title, gapBefore, separatorBefore, bold, action)
+        var rows: [(String, Bool, Bool, Bool, MenuAction)] = []
+        rows.append((displayUserName(), false, false, true, MenuAction(.home)))   // gesperrt
+        for e in MenuEntryStore.entries() {
+            rows.append((e.title, e.gapBefore, e.separatorBefore, false, e.action))
+        }
+
+        var y: CGFloat = 64
+        for (title, gap, sep, bold, action) in rows {
+            if gap {
+                y += 12
+                if sep { rightEntryViews.append(contentsOf: addSeparator(at: y - 7, x: innerX, width: innerW)) }
+            }
+            let row = RightRowButton(title: title, bold: bold,
+                                     action: { [weak self] in self?.perform(action) })
+            row.frame = NSRect(x: innerX, y: y, width: innerW, height: 40)
+            root.addSubview(row)
+            rightEntryViews.append(row)
+            y += 40
+        }
+    }
+
+    private func displayUserName() -> String {
+        UserDefaults.standard.bool(forKey: "demoMode")
+            ? "Max Mustermann"
+            : (NSFullUserName().isEmpty ? NSUserName() : NSFullUserName())
+    }
+
     /// A subtle engraved separator line (dark + light) in the right column.
-    private func addSeparator(at y: CGFloat, x: CGFloat, width: CGFloat) {
+    @discardableResult
+    private func addSeparator(at y: CGFloat, x: CGFloat, width: CGFloat) -> [NSView] {
         let dark = NSView(frame: NSRect(x: x, y: y, width: width, height: 1))
         dark.wantsLayer = true
         dark.layer?.backgroundColor = NSColor(calibratedWhite: 0, alpha: 0.18).cgColor
@@ -178,6 +198,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         light.wantsLayer = true
         light.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.40).cgColor
         root.addSubview(light)
+        return [dark, light]
     }
 
     // MARK: - Data
@@ -416,6 +437,53 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private func openSettings() {
         openPath("/System/Applications/System Settings.app")
     }
+    private func openAppByID(_ id: String, fallback path: String) {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        } else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        }
+        hide()
+    }
+
+    /// Execute a configurable Start-menu action (right column entries + avatar).
+    func perform(_ action: MenuAction) {
+        let home = NSHomeDirectory()
+        switch action.kind {
+        case .home:            openPath(home)
+        case .documents:       openHome("Documents")
+        case .downloads:       openHome("Downloads")
+        case .desktop:         openHome("Desktop")
+        case .pictures:        openHome("Pictures")
+        case .music:           openHome("Music")
+        case .movies:          openHome("Movies")
+        case .publicFolder:    openHome("Public")
+        case .icloud:          openPath(home + "/Library/Mobile Documents/com~apple~CloudDocs")
+        case .applications:    openPath("/Applications")
+        case .utilities:       openPath("/Applications/Utilities")
+        case .computer:        openURL("file:///")
+        case .trash:           openPath(home + "/.Trash")
+        case .openFolder:      openPath(action.param ?? home)
+        case .openURL:         openURL(action.param ?? "")
+        case .openApp:
+            if let p = action.param {
+                NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: p), configuration: .init())
+            }
+            hide()
+        case .systemSettings:  openSettings()
+        case .activityMonitor: openAppByID("com.apple.ActivityMonitor", fallback: "/System/Applications/Utilities/Activity Monitor.app")
+        case .terminal:        openAppByID("com.apple.Terminal", fallback: "/System/Applications/Utilities/Terminal.app")
+        case .launchpad:       openPath("/System/Applications/Launchpad.app")
+        case .missionControl:  openPath("/System/Applications/Mission Control.app")
+        case .screenshot:      openPath("/System/Applications/Utilities/Screenshot.app")
+        case .helpApple:       openURL("https://support.apple.com/de-de")
+        case .sleep:           runOSA("tell application \"System Events\" to sleep")
+        case .lock:            runOSA("tell application \"System Events\" to keystroke \"q\" using {command down, control down}")
+        case .logout:          runOSA("tell application \"System Events\" to log out")
+        case .restart:         runOSA("tell application \"System Events\" to restart")
+        case .shutdown:        runOSA("tell application \"System Events\" to shut down")
+        }
+    }
 
     private func runOSA(_ command: String) {
         let p = Process()
@@ -505,12 +573,18 @@ private final class ColumnTintView: NSView {
 // MARK: - Avatar
 
 private final class AvatarView: NSView {
+    /// Freely assignable click action (configured in the Start-menu editor).
+    var onClick: (() -> Void)?
+
     /// The macOS account picture of the current user, if available.
     private static let accountImage: NSImage? = {
         let authority = CBIdentityAuthority.default()
         guard let identity = CBIdentity(name: NSUserName(), authority: authority) else { return nil }
         return identity.image
     }()
+
+    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 
     override func draw(_ dirtyRect: NSRect) {
         let outer = bounds.insetBy(dx: 1, dy: 1)

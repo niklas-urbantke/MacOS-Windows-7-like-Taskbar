@@ -24,6 +24,13 @@ if [ -d "orbs" ]; then
     echo "▶ Orbs eingebunden: $(ls orbs/*.png 2>/dev/null | xargs -n1 basename | paste -sd ', ' -)"
 fi
 
+# Original-Windows-7-Theme-Grafiken (Leiste, Buttons, Orb, Show-Desktop …).
+if [ -d "ThemeResources" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/theme"
+    cp ThemeResources/*.png "$APP_BUNDLE/Contents/Resources/theme/" 2>/dev/null
+    echo "▶ Win7-Theme-Grafiken eingebunden: $(ls ThemeResources/*.png 2>/dev/null | wc -l | tr -d ' ') PNGs."
+fi
+
 cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
