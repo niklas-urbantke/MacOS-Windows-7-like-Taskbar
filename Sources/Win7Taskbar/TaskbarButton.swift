@@ -200,7 +200,7 @@ final class TaskbarButton: NSControl {
         item.icon.draw(in: iconRect,
                        from: .zero,
                        operation: .sourceOver,
-                       fraction: running ? 1.0 : 0.78)
+                       fraction: 1.0)
 
         // Notification badge (e.g. Slack/Teams unread) in the top-right of the icon.
         if let badge = item.badge {

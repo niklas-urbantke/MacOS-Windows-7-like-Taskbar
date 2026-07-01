@@ -4,6 +4,10 @@ Win7Taskbar.app/
 
 # macOS
 .DS_Store
+Icon?
 
 # Release-Artefakt
 *.dmg
+
+# Referenz-Repo (nur zum Nachschauen, nicht Teil des Projekts)
+aerothemeplasma/

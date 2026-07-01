@@ -133,14 +133,20 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         buildRightEntries()
 
         // Shut-down split button (Windows-7 silver style), bottom-right.
-        let shutW: CGFloat = innerW - 30
+        // Two flush halves that share one continuous top/bottom edge: the
+        // "Herunterfahren" part is rounded on the left only, the arrow on the
+        // right only, so together they read as a single split button.
+        let arrowW: CGFloat = 26
+        let shutW: CGFloat = innerW - 4 - arrowW
         let shut = Win7Button(title: "Herunterfahren")
+        shut.roundRight = false
         shut.onClick = { [weak self] in self?.shutdownAction() }
         shut.frame = NSRect(x: innerX, y: H - 46, width: shutW, height: 28)
         root.addSubview(shut)
 
         let arrow = Win7Button(title: "▶")
-        arrow.frame = NSRect(x: innerX + shutW + 2, y: H - 46, width: 26, height: 28)
+        arrow.roundLeft = false
+        arrow.frame = NSRect(x: innerX + shutW, y: H - 46, width: arrowW, height: 28)
         arrow.onClick = { [weak self, weak arrow] in if let a = arrow { self?.showPowerMenu(from: a) } }
         root.addSubview(arrow)
     }
@@ -641,9 +647,36 @@ private final class AvatarView: NSView {
 
 private final class Win7Button: NSControl {
     var onClick: (() -> Void)?
+    /// Which corners are rounded. Set both false-on-one-side to fuse two
+    /// buttons into a single split control with a continuous top/bottom line.
+    var roundLeft = true { didSet { needsDisplay = true } }
+    var roundRight = true { didSet { needsDisplay = true } }
     private let title: String
     private var hovering = false
     private var pressed = false
+
+    /// Rounded-rect path with per-side corner control (rounds the left and/or
+    /// right corners; the other side stays square so edges meet flush).
+    private func framePath(_ r: NSRect, radius: CGFloat) -> NSBezierPath {
+        let rl = roundLeft ? radius : 0
+        let rr = roundRight ? radius : 0
+        let p = NSBezierPath()
+        p.move(to: NSPoint(x: r.minX + rl, y: r.maxY))
+        p.line(to: NSPoint(x: r.maxX - rr, y: r.maxY))
+        if rr > 0 { p.appendArc(withCenter: NSPoint(x: r.maxX - rr, y: r.maxY - rr), radius: rr, startAngle: 90, endAngle: 0, clockwise: true) }
+        else { p.line(to: NSPoint(x: r.maxX, y: r.maxY)) }
+        p.line(to: NSPoint(x: r.maxX, y: r.minY + rr))
+        if rr > 0 { p.appendArc(withCenter: NSPoint(x: r.maxX - rr, y: r.minY + rr), radius: rr, startAngle: 0, endAngle: -90, clockwise: true) }
+        else { p.line(to: NSPoint(x: r.maxX, y: r.minY)) }
+        p.line(to: NSPoint(x: r.minX + rl, y: r.minY))
+        if rl > 0 { p.appendArc(withCenter: NSPoint(x: r.minX + rl, y: r.minY + rl), radius: rl, startAngle: 270, endAngle: 180, clockwise: true) }
+        else { p.line(to: NSPoint(x: r.minX, y: r.minY)) }
+        p.line(to: NSPoint(x: r.minX, y: r.maxY - rl))
+        if rl > 0 { p.appendArc(withCenter: NSPoint(x: r.minX + rl, y: r.maxY - rl), radius: rl, startAngle: 180, endAngle: 90, clockwise: true) }
+        else { p.line(to: NSPoint(x: r.minX, y: r.maxY)) }
+        p.close()
+        return p
+    }
 
     init(title: String) {
         self.title = title
@@ -664,7 +697,7 @@ private final class Win7Button: NSControl {
 
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds.insetBy(dx: 0.5, dy: 0.5)
-        let path = NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3)
+        let path = framePath(r, radius: 3)
 
         let aero = UserDefaults.standard.string(forKey: "menuStyle") == "aero"
         let colors: [NSColor]
@@ -717,7 +750,7 @@ private final class Win7Button: NSControl {
 
         // Top inner highlight + outer border.
         NSColor(calibratedWhite: 1, alpha: 0.45).setStroke()
-        let hi = NSBezierPath(roundedRect: r.insetBy(dx: 1, dy: 1), xRadius: 2.5, yRadius: 2.5)
+        let hi = framePath(r.insetBy(dx: 1, dy: 1), radius: 2.5)
         hi.lineWidth = 1; hi.stroke()
         border.withAlphaComponent(0.7).setStroke(); path.lineWidth = 1; path.stroke()
 

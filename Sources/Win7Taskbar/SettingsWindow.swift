@@ -22,6 +22,12 @@ final class SettingsWindowController: NSObject {
     private let heightSlider = NSSlider(frame: .zero)
     private let heightLabel = NSTextField(labelWithString: "")
 
+    // Startmenü-Tastenkürzel-Rekorder.
+    private let hotkeyButton = HotkeyRecorderButton(title: "—", target: nil, action: nil)
+
+    // Finder-Symbol (nur für diese Taskleiste).
+    private let finderIconStatus = NSTextField(labelWithString: "")
+
     // Taskleisten-Stil-Profil.
     private let taskbarStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let taskbarStyles: [(label: String, value: String)] = [("Windows Vista", "vista"), ("Windows 7", "win7")]
@@ -118,16 +124,49 @@ final class SettingsWindowController: NSObject {
             box.action = #selector(changed(_:))
         }
 
+        // Start-menu shortcut recorder.
+        hotkeyButton.bezelStyle = .rounded
+        hotkeyButton.target = self
+        hotkeyButton.action = #selector(recordHotkey)
+        hotkeyButton.onCapture = { [weak self] keyCode, mods, chars in
+            guard let self else { return }
+            let modOnly = (keyCode == HotkeyRecorderButton.modifierOnly)
+            let label = modOnly
+                ? SettingsWindowController.modString(mods)
+                : SettingsWindowController.shortcutString(mods, keyCode, chars)
+            self.controller?.setStartHotkey(keyCode: modOnly ? -1 : Int(keyCode), mods: mods.rawValue, label: label)
+            self.hotkeyButton.title = label
+        }
+        hotkeyButton.onCancel = { [weak self] in
+            self?.hotkeyButton.title = self?.controller?.startHotkeyLabel ?? "—"
+        }
+        let hotkeyClear = NSButton(title: "Zurücksetzen", target: self, action: #selector(clearHotkey))
+        hotkeyClear.bezelStyle = .rounded
+        let hotkeyRow = NSStackView(views: [NSTextField(labelWithString: "Startmenü-Kürzel:"),
+                                            hotkeyButton, hotkeyClear])
+        hotkeyRow.orientation = .horizontal
+        hotkeyRow.spacing = 8
+
+        // Custom Finder icon (this taskbar only).
+        let finderIconButton = NSButton(title: "Bild wählen…", target: self, action: #selector(chooseFinderIcon))
+        finderIconButton.bezelStyle = .rounded
+        let finderIconReset = NSButton(title: "Zurücksetzen", target: self, action: #selector(resetFinderIcon))
+        finderIconReset.bezelStyle = .rounded
+        let finderIconRow = NSStackView(views: [NSTextField(labelWithString: "Finder-Symbol:"),
+                                                finderIconButton, finderIconReset, finderIconStatus])
+        finderIconRow.orientation = .horizontal
+        finderIconRow.spacing = 8
+
         // Categorised tabs.
         let tabView = NSTabView()
         tabView.translatesAutoresizingMaskIntoConstraints = false
-        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox]))
+        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox, hotkeyRow]))
         tabView.addTabViewItem(makeTab("Darstellung", [orbRow, styleRow, heightRow, fullHeightBox]))
         tabView.addTabViewItem(makeTab("Transparenz",
                                        [tbHeader, tbStyleRow, tbOpacityRow, tbBlurRow, tbGlassRow,
                                         menuHeader, menuOpacityRow, menuBlurRow]))
         tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox]))
-        tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox]))
+        tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox, finderIconRow]))
 
         let quit = NSButton(title: "Taskleiste beenden", target: self, action: #selector(quitAction))
         quit.bezelStyle = .rounded
@@ -219,6 +258,8 @@ final class SettingsWindowController: NSObject {
         wifiBox.state = c.wifiEnabled ? .on : .off
         monitorBox.state = c.monitorEnabled ? .on : .off
         autostartBox.state = c.autostartEnabled ? .on : .off
+        hotkeyButton.title = c.startHotkeyLabel
+        updateFinderIconStatus()
         finderDesktopBox.state = c.hideFinderDesktopEnabled ? .on : .off
         fullHeightBox.state = c.fullHeightIcons ? .on : .off
         if let idx = orbs.firstIndex(where: { $0.file == c.selectedOrbFile }) {
@@ -277,6 +318,75 @@ final class SettingsWindowController: NSObject {
     }
 
     @objc private func openMenuEditor() { controller?.openMenuEditor() }
+
+    // MARK: - Custom Finder icon
+
+    @objc private func chooseFinderIcon() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .tiff, .image, .icns]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Bild für das Finder-Symbol dieser Taskleiste wählen"
+        let handler: (NSApplication.ModalResponse) -> Void = { [weak self] resp in
+            guard resp == .OK, let url = panel.url, let self else { return }
+            self.controller?.setFinderIcon(from: url)
+            self.updateFinderIconStatus()
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: handler) }
+        else { panel.begin(completionHandler: handler) }
+    }
+
+    @objc private func resetFinderIcon() {
+        controller?.clearFinderIcon()
+        updateFinderIconStatus()
+    }
+
+    private func updateFinderIconStatus() {
+        finderIconStatus.stringValue = (controller?.hasCustomFinderIcon ?? false) ? "eigenes Bild aktiv" : "Standard"
+    }
+
+    // MARK: - Start-menu shortcut recorder
+
+    @objc private func recordHotkey() {
+        hotkeyButton.title = "Tasten drücken… (Esc bricht ab)"
+        hotkeyButton.beginRecording()
+    }
+
+    @objc private func clearHotkey() {
+        controller?.clearStartHotkey()
+        hotkeyButton.title = controller?.startHotkeyLabel ?? "—"
+    }
+
+    private static func modString(_ mods: NSEvent.ModifierFlags) -> String {
+        var s = ""
+        if mods.contains(.function) { s += "fn" }
+        if mods.contains(.control) { s += "⌃" }
+        if mods.contains(.option) { s += "⌥" }
+        if mods.contains(.shift) { s += "⇧" }
+        if mods.contains(.command) { s += "⌘" }
+        return s
+    }
+
+    private static func shortcutString(_ mods: NSEvent.ModifierFlags, _ keyCode: UInt16, _ chars: String?) -> String {
+        modString(mods) + keyName(keyCode, chars)
+    }
+
+    private static func keyName(_ keyCode: UInt16, _ chars: String?) -> String {
+        switch keyCode {
+        case 53: return "⎋"
+        case 49: return "Leertaste"
+        case 36: return "↩"
+        case 48: return "⇥"
+        case 51: return "⌫"
+        case 123: return "←"; case 124: return "→"; case 125: return "↓"; case 126: return "↑"
+        case 122: return "F1"; case 120: return "F2"; case 99: return "F3"; case 118: return "F4"
+        case 96: return "F5"; case 97: return "F6"; case 98: return "F7"; case 100: return "F8"
+        case 101: return "F9"; case 109: return "F10"; case 103: return "F11"; case 111: return "F12"
+        default:
+            if let c = chars, !c.isEmpty, c != " " { return c.uppercased() }
+            return "Taste \(keyCode)"
+        }
+    }
 
     @objc private func menuStyleChanged() {
         let i = menuStylePopup.indexOfSelectedItem
@@ -344,4 +454,61 @@ final class SettingsWindowController: NSObject {
     }
 
     @objc private func quitAction() { NSApp.terminate(nil) }
+}
+
+/// A button that records a key combination: while recording it becomes first responder and captures
+/// the next key (with modifiers) directly — including ⌘-combos via performKeyEquivalent. Esc cancels.
+final class HotkeyRecorderButton: NSButton {
+    /// Sentinel keyCode meaning "modifiers only" (e.g. ⌃⌘ with no regular key).
+    static let modifierOnly: UInt16 = 0xFFFF
+    static let mask: NSEvent.ModifierFlags = [.command, .option, .control, .shift, .function]
+
+    var onCapture: ((UInt16, NSEvent.ModifierFlags, String?) -> Void)?
+    var onCancel: (() -> Void)?
+    private var recording = false
+    private var pendingMods: NSEvent.ModifierFlags = []
+
+    override var acceptsFirstResponder: Bool { true }
+
+    func beginRecording() {
+        recording = true
+        pendingMods = []
+        window?.makeFirstResponder(self)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if recording { handleKey(event); return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if recording { handleKey(event) } else { super.keyDown(with: event) }
+    }
+
+    // Modifier-only combos (⌃⌘ etc.) only produce flagsChanged: accumulate while held, commit on release.
+    override func flagsChanged(with event: NSEvent) {
+        guard recording else { super.flagsChanged(with: event); return }
+        let mods = event.modifierFlags.intersection(Self.mask)
+        if mods.isEmpty {
+            if modCount(pendingMods) >= 2 {
+                recording = false
+                onCapture?(Self.modifierOnly, pendingMods, nil)
+            }
+            pendingMods = []
+        } else {
+            pendingMods.formUnion(mods)
+        }
+    }
+
+    private func handleKey(_ e: NSEvent) {
+        let mods = e.modifierFlags.intersection(Self.mask)
+        if e.keyCode == 53 && mods.isEmpty { recording = false; onCancel?(); return }  // Esc cancels
+        guard !mods.isEmpty else { return }                                            // need a modifier
+        recording = false
+        onCapture?(e.keyCode, mods, e.charactersIgnoringModifiers)
+    }
+
+    private func modCount(_ m: NSEvent.ModifierFlags) -> Int {
+        [.command, .option, .control, .shift, .function].reduce(0) { $0 + (m.contains($1) ? 1 : 0) }
+    }
 }

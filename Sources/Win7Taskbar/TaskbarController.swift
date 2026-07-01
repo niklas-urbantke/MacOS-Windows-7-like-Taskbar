@@ -213,9 +213,42 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         }
         for item in newItems where !orderedKeys.contains(item.key) { ordered.append(item) }
 
+        // Custom Finder icon (this taskbar only), if the user set one.
+        if let img = customFinderIcon() {
+            for item in ordered where item.key == "com.apple.finder" { item.icon = img }
+        }
+
         items = ordered
         orderedKeys = items.map { $0.key }
         layoutButtons()
+    }
+
+    // MARK: - Custom Finder icon (taskbar-only override)
+
+    private var iconsDir: URL {
+        let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Win7Taskbar/icons", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+    private func customFinderIcon() -> NSImage? {
+        guard let p = UserDefaults.standard.string(forKey: "finderIconPath") else { return nil }
+        return NSImage(contentsOfFile: p)
+    }
+    var hasCustomFinderIcon: Bool { UserDefaults.standard.string(forKey: "finderIconPath") != nil }
+    func setFinderIcon(from src: URL) {
+        let dest = iconsDir.appendingPathComponent("finderIcon")
+        try? FileManager.default.removeItem(at: dest)
+        do {
+            try FileManager.default.copyItem(at: src, to: dest)
+            UserDefaults.standard.set(dest.path, forKey: "finderIconPath")
+            rebuildItems()
+        } catch { NSLog("Finder-Icon setzen fehlgeschlagen: \(error)") }
+    }
+    func clearFinderIcon() {
+        try? FileManager.default.removeItem(at: iconsDir.appendingPathComponent("finderIcon"))
+        UserDefaults.standard.removeObject(forKey: "finderIconPath")
+        rebuildItems()
     }
 
     private func slotX(_ i: Int) -> CGFloat { buttonStartX + CGFloat(i) * buttonPitch }
@@ -718,12 +751,12 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private func installHotkey() {
         let handler: (NSEvent) -> Void = { [weak self] event in
             guard let self else { return }
-            let f = event.modifierFlags
-            let bothDown = f.contains(.control) && f.contains(.function)
-            if bothDown && self.hotkeyArmed {
-                self.hotkeyArmed = false
-                self.toggleStart()
-            } else if !bothDown {
+            let want = self.modifierHotkeyMask()
+            guard !want.isEmpty else { self.hotkeyArmed = true; return }
+            let have = event.modifierFlags.intersection([.command, .option, .control, .shift, .function])
+            if have == want {
+                if self.hotkeyArmed { self.hotkeyArmed = false; self.toggleStart() }
+            } else {
                 self.hotkeyArmed = true
             }
         }
@@ -740,6 +773,47 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         if let g = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] in self?.handleNumberHotkey($0) }) {
             hotkeyMonitors.append(g)
         }
+
+        // User-configurable Start-menu shortcut (key + modifiers), in addition to fn+Control.
+        let startKey: (NSEvent) -> Void = { [weak self] in self?.handleStartHotkey($0) }
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: startKey) {
+            hotkeyMonitors.append(g)
+        }
+        if let l = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { startKey($0); return $0 }) {
+            hotkeyMonitors.append(l)
+        }
+    }
+
+    /// The modifier-only Start shortcut: the configured one (keyCode == -1) or the fn+Control default.
+    private func modifierHotkeyMask() -> NSEvent.ModifierFlags {
+        if let kc = UserDefaults.standard.object(forKey: "startHotkeyKeyCode") as? Int, kc == -1 {
+            return NSEvent.ModifierFlags(rawValue: UInt(UserDefaults.standard.integer(forKey: "startHotkeyMods")))
+                .intersection([.command, .option, .control, .shift, .function])
+        }
+        return [.control, .function]   // Standard: fn + Strg
+    }
+
+    private func handleStartHotkey(_ event: NSEvent) {
+        guard let kc = UserDefaults.standard.object(forKey: "startHotkeyKeyCode") as? Int, kc >= 0 else { return }
+        let want = NSEvent.ModifierFlags(rawValue: UInt(UserDefaults.standard.integer(forKey: "startHotkeyMods")))
+            .intersection([.command, .option, .control, .shift])
+        let have = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if Int(event.keyCode) == kc && have == want { toggleStart() }
+    }
+
+    // Konfigurierbares Startmenü-Tastenkürzel.
+    var startHotkeyLabel: String { UserDefaults.standard.string(forKey: "startHotkeyLabel") ?? "fn + ⌃ (Standard)" }
+    func setStartHotkey(keyCode: Int, mods: UInt, label: String) {
+        let d = UserDefaults.standard
+        d.set(keyCode, forKey: "startHotkeyKeyCode")
+        d.set(Int(mods), forKey: "startHotkeyMods")
+        d.set(label, forKey: "startHotkeyLabel")
+    }
+    func clearStartHotkey() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: "startHotkeyKeyCode")
+        d.removeObject(forKey: "startHotkeyMods")
+        d.removeObject(forKey: "startHotkeyLabel")
     }
 
     private func handleNumberHotkey(_ event: NSEvent) {
