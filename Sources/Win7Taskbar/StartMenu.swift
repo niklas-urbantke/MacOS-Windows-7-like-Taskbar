@@ -11,6 +11,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private let tint = ColumnTintView(frame: .zero)
     private let blur = NSVisualEffectView()
     private let avatar = AvatarView(frame: .zero)
+    private let hoverIcon = NSImageView(frame: .zero)   // action icon shown at the avatar spot on hover
     private let listDoc = FlippedView()        // manual-layout document view (fast for long lists)
     private var listY: CGFloat = 0
     private static var iconCache: [String: NSImage] = [:]
@@ -92,12 +93,19 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         avatar.onClick = { [weak self] in self?.perform(MenuEntryStore.avatarAction()) }
         outer.addSubview(avatar)
 
+        // Action icon overlay: shown at the avatar's spot (same size, no frame) while hovering a
+        // right-column action.
+        hoverIcon.frame = avatar.frame
+        hoverIcon.imageScaling = .scaleProportionallyUpOrDown
+        hoverIcon.isHidden = true
+        outer.addSubview(hoverIcon)
+
         window.contentView = outer
     }
 
     private func buildLeftColumn() {
         // Scrollable program list.
-        let bottomBlock: CGFloat = 88
+        let bottomBlock: CGFloat = 108
         scrollView.frame = NSRect(x: 12, y: 12, width: leftW - 24, height: H - bottomBlock - 18)
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
@@ -115,14 +123,35 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         root.addSubview(alle)
         alleButton = alle
 
-        // Search field.
-        searchField.frame = NSRect(x: 14, y: H - 42, width: leftW - 28, height: 30)
-        searchField.placeholderString = "Programme/Dateien durchsuchen"
+        // Light-blue search band at the bottom of the white panel, with a soft shadow + line at its
+        // top edge (the transition from the white list area).
+        let band = SearchPanelBandView(frame: NSRect(x: 10, y: H - 66, width: leftW - 20, height: 56))
+        root.addSubview(band)
+
+        // Search field with a custom Win7 frame: white background, subtle recessed top shading
+        // and a light blue-grey border. The borderless text field sits on top (centred in the band).
+        let fieldRect = NSRect(x: 14, y: H - 53, width: leftW - 28, height: 30)
+        let searchBG = SearchBackgroundView(frame: fieldRect)
+        root.addSubview(searchBG)
+
+        searchField.frame = NSRect(x: fieldRect.minX + 7, y: fieldRect.midY - 9, width: fieldRect.width - 34, height: 18)
+        searchField.placeholderAttributedString = NSAttributedString(
+            string: "Programme/Dateien durchsuchen",
+            attributes: [.foregroundColor: NSColor(srgbRed: 0x70/255, green: 0x70/255, blue: 0x70/255, alpha: 1),
+                         .font: NSFont.systemFont(ofSize: 13)])
         searchField.delegate = self
-        searchField.bezelStyle = .roundedBezel
+        searchField.isBordered = false
+        searchField.drawsBackground = false
         searchField.font = NSFont.systemFont(ofSize: 13)
+        searchField.textColor = .black
         searchField.focusRingType = .none
         root.addSubview(searchField)
+
+        let mag = NSImageView(frame: NSRect(x: fieldRect.maxX - 24, y: fieldRect.midY - 8.5, width: 17, height: 17))
+        mag.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Suche")
+        mag.symbolConfiguration = .init(pointSize: 12, weight: .semibold)
+        mag.contentTintColor = NSColor(srgbRed: 0.20, green: 0.47, blue: 0.78, alpha: 1)
+        root.addSubview(mag)
     }
 
     private func buildRightColumn() {
@@ -141,12 +170,12 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         let shut = Win7Button(title: "Herunterfahren")
         shut.roundRight = false
         shut.onClick = { [weak self] in self?.shutdownAction() }
-        shut.frame = NSRect(x: innerX, y: H - 46, width: shutW, height: 28)
+        shut.frame = NSRect(x: innerX, y: H - 52, width: shutW, height: 28)
         root.addSubview(shut)
 
         let arrow = Win7Button(title: "▶")
         arrow.roundLeft = false
-        arrow.frame = NSRect(x: innerX + shutW, y: H - 46, width: arrowW, height: 28)
+        arrow.frame = NSRect(x: innerX + shutW, y: H - 52, width: arrowW, height: 28)
         arrow.onClick = { [weak self, weak arrow] in if let a = arrow { self?.showPowerMenu(from: a) } }
         root.addSubview(arrow)
     }
@@ -179,6 +208,10 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
             }
             let row = RightRowButton(title: title, bold: bold,
                                      action: { [weak self] in self?.perform(action) })
+            row.onHover = { [weak self] entered in
+                guard let self else { return }
+                if entered { self.showActionIcon(action) } else { self.hideActionIcon() }
+            }
             row.frame = NSRect(x: innerX, y: y, width: innerW, height: 40)
             root.addSubview(row)
             rightEntryViews.append(row)
@@ -362,6 +395,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     func show(relativeTo orbScreenRect: NSRect, on screen: NSScreen) {
         allApps = AppScanner.installedApps()
         showingAll = false
+        hideActionIcon()
         alleButton?.setTitle("Alle Programme", back: false)
         searchField.stringValue = ""
         root.subviews.forEach { $0.needsDisplay = true }   // reflect a possible style change
@@ -452,6 +486,59 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         hide()
     }
 
+    // MARK: - Hover action icon (shown at the avatar spot)
+
+    private func showActionIcon(_ action: MenuAction) {
+        hoverIcon.image = actionIcon(action)
+        hoverIcon.isHidden = false
+        avatar.isHidden = true
+    }
+    private func hideActionIcon() {
+        hoverIcon.isHidden = true
+        avatar.isHidden = false
+    }
+
+    /// A representative icon for an action (folder/app icon from the system, or an SF Symbol).
+    private func actionIcon(_ a: MenuAction) -> NSImage {
+        let ws = NSWorkspace.shared
+        let home = NSHomeDirectory()
+        func file(_ p: String) -> NSImage { ws.icon(forFile: p) }
+        func sym(_ n: String) -> NSImage {
+            NSImage(systemSymbolName: n, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 48, weight: .regular)) ?? NSImage()
+        }
+        switch a.kind {
+        case .home:            return file(home)
+        case .documents:       return file(home + "/Documents")
+        case .downloads:       return file(home + "/Downloads")
+        case .desktop:         return file(home + "/Desktop")
+        case .pictures:        return file(home + "/Pictures")
+        case .music:           return file(home + "/Music")
+        case .movies:          return file(home + "/Movies")
+        case .publicFolder:    return file(home + "/Public")
+        case .icloud:          return file(home + "/Library/Mobile Documents/com~apple~CloudDocs")
+        case .applications:    return file("/Applications")
+        case .utilities:       return file("/Applications/Utilities")
+        case .computer:        return file("/")
+        case .trash:           return file(home + "/.Trash")
+        case .openFolder:      return file(a.param ?? home)
+        case .openApp:         return a.param.map(file) ?? sym("app.fill")
+        case .openURL:         return NSWorkspace.shared.icon(forFileType: "public.url")
+        case .systemSettings:  return file("/System/Applications/System Settings.app")
+        case .activityMonitor: return file("/System/Applications/Utilities/Activity Monitor.app")
+        case .terminal:        return file("/System/Applications/Utilities/Terminal.app")
+        case .launchpad:       return file("/System/Applications/Launchpad.app")
+        case .missionControl:  return file("/System/Applications/Mission Control.app")
+        case .screenshot:      return file("/System/Applications/Utilities/Screenshot.app")
+        case .helpApple:       return sym("questionmark.circle.fill")
+        case .sleep:           return sym("moon.fill")
+        case .lock:            return sym("lock.fill")
+        case .logout:          return sym("rectangle.portrait.and.arrow.right.fill")
+        case .restart:         return sym("arrow.clockwise.circle.fill")
+        case .shutdown:        return sym("power.circle.fill")
+        }
+    }
+
     /// Execute a configurable Start-menu action (right column entries + avatar).
     func perform(_ action: MenuAction) {
         let home = NSHomeDirectory()
@@ -534,6 +621,44 @@ final class KeyableWindow: NSWindow {
 
 final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// The light-blue search band at the bottom of the left panel (#f2f5fb) with a soft shadow and a
+/// thin line along its top edge — the transition from the white program list above.
+private final class SearchPanelBandView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(srgbRed: 242/255, green: 245/255, blue: 251/255, alpha: 1).setFill()
+        bounds.fill()
+        // Soft shadow just under the top edge (this view is not flipped → top = maxY).
+        let shadow = NSRect(x: bounds.minX, y: bounds.maxY - 6, width: bounds.width, height: 6)
+        NSGradient(colors: [NSColor(calibratedWhite: 0, alpha: 0.10),
+                            NSColor(calibratedWhite: 0, alpha: 0.0)])?.draw(in: shadow, angle: -90)
+        // Thin separator line at the very top.
+        NSColor(srgbRed: 0xcd/255, green: 0xdb/255, blue: 0xea/255, alpha: 1).setFill()
+        NSRect(x: bounds.minX, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
+    }
+}
+
+/// Windows-7 search box background: white, a subtle recessed shadow along the top inner edge,
+/// and a light blue-grey border.
+private final class SearchBackgroundView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3)
+        NSColor.white.setFill(); path.fill()
+
+        // Recessed inner shadow along the top edge (this view is not flipped → top = maxY).
+        NSGraphicsContext.current?.saveGraphicsState()
+        path.addClip()
+        let top = NSRect(x: r.minX, y: r.maxY - 5, width: r.width, height: 5)
+        NSGradient(colors: [NSColor(calibratedWhite: 0, alpha: 0.16),
+                            NSColor(calibratedWhite: 0, alpha: 0.0)])?.draw(in: top, angle: -90)
+        NSGraphicsContext.current?.restoreGraphicsState()
+
+        // Light blue-grey border.
+        NSColor(srgbRed: 0x7f/255, green: 0x9d/255, blue: 0xb9/255, alpha: 1).setStroke()
+        path.lineWidth = 1; path.stroke()
+    }
 }
 
 /// Background: a translucent accent-coloured frosted layer over the whole menu, with a SOLID
@@ -686,6 +811,19 @@ private final class Win7Button: NSControl {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Build a top→bottom gradient from (hex, opacity) stops at locations 0 / 0.5 / 0.5 / 1
+    /// (the doubled middle stop yields the crisp Windows-7 glass crease).
+    static func glassGradient(_ stops: [(String, CGFloat)]) -> NSGradient? {
+        NSGradient(colors: stops.map { hexColor($0.0, alpha: $0.1) },
+                   atLocations: [0.0, 0.5, 0.5, 1.0], colorSpace: .sRGB)
+    }
+    static func hexColor(_ hex: String, alpha: CGFloat) -> NSColor {
+        let v = UInt32(hex, radix: 16) ?? 0
+        return NSColor(srgbRed: CGFloat((v >> 16) & 0xff) / 255,
+                       green: CGFloat((v >> 8) & 0xff) / 255,
+                       blue: CGFloat(v & 0xff) / 255, alpha: alpha)
+    }
+
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func mouseDown(with event: NSEvent) { pressed = true; needsDisplay = true }
@@ -700,25 +838,30 @@ private final class Win7Button: NSControl {
         let path = framePath(r, radius: 3)
 
         let aero = UserDefaults.standard.string(forKey: "menuStyle") == "aero"
-        let colors: [NSColor]
-        let border: NSColor
-        let textColor: NSColor
-        let fillAlpha: CGFloat
+        let textColor: NSColor = .white
+        var border = NSColor(calibratedWhite: 0, alpha: 0.6)
 
         if aero {
-            // Silver Win7 glass to match the dark Aero menu.
-            func g(_ v: CGFloat) -> NSColor { NSColor(calibratedWhite: v, alpha: 1) }
+            // Exact Windows-7 button glass: a dark base gradient + a light "high" glass gradient on
+            // top (stops taken 1:1 from the reference startmenu-buttons.svg), per state. The doubled
+            // 0.5 stop makes the crisp glass crease across the middle.
+            let blackStops: [(String, CGFloat)]
+            let highStops: [(String, CGFloat)]
             if pressed {
-                colors = [g(0.78), g(0.84), g(0.88), g(0.90)]; border = g(0.45)
+                blackStops = [("000000", 0.55), ("000000", 0.72), ("000000", 0.88), ("000000", 0.51)]
+                highStops  = [("c8c8c8", 0.32), ("272727", 0.35), ("000000", 0.36), ("181818", 0.329)]
             } else if hovering {
-                colors = [g(1.00), g(0.96), g(0.90), g(0.96)]; border = g(0.50)
+                blackStops = [("000000", 0.55), ("000000", 0.72), ("000000", 0.88), ("000000", 0.51)]
+                highStops  = [("fefefe", 0.859), ("fcfcfc", 0.69), ("fbfbfb", 0.612), ("fcfcfc", 0.66)]
             } else {
-                colors = [g(0.99), g(0.93), g(0.85), g(0.92)]; border = g(0.55)
+                blackStops = [("000000", 0.35), ("000203", 0.55), ("000305", 0.67), ("000407", 0.34)]
+                highStops  = [("f7f7f7", 0.51), ("eeeeee", 0.23), ("e6e6e6", 0.129), ("f2f2f2", 0.23)]
             }
-            textColor = .white
-            fillAlpha = 0.3
+            Win7Button.glassGradient(blackStops)?.draw(in: path, angle: -90)
+            Win7Button.glassGradient(highStops)?.draw(in: path, angle: -90)
         } else {
             // Accent-coloured glass.
+            let colors: [NSColor]
             if pressed {
                 colors = [Theme.accent(brightness: 0.62, saturation: 1.0), Theme.accent(brightness: 0.72, saturation: 0.95),
                           Theme.accent(brightness: 0.8, saturation: 0.9), Theme.accent(brightness: 0.88, saturation: 0.85)]
@@ -732,27 +875,19 @@ private final class Win7Button: NSControl {
                           Theme.accent(brightness: 0.8, saturation: 0.95), Theme.accent(brightness: 0.96, saturation: 0.85)]
                 border = Theme.accent(brightness: 0.6)
             }
-            textColor = .white
-            fillAlpha = 0.5
+            NSGradient(colors: colors.map { $0.withAlphaComponent(0.5) },
+                       atLocations: [0.0, 0.49, 0.5, 1.0], colorSpace: .sRGB)?.draw(in: path, angle: -90)
+            NSGraphicsContext.current?.saveGraphicsState()
+            path.addClip()
+            let gloss = NSRect(x: r.minX, y: r.midY, width: r.width, height: r.height / 2)
+            NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.45),
+                                NSColor(calibratedWhite: 1, alpha: 0.0)])?.draw(in: gloss, angle: -90)
+            NSGraphicsContext.current?.restoreGraphicsState()
         }
 
-        let faded = colors.map { $0.withAlphaComponent(fillAlpha) }
-        NSGradient(colors: faded, atLocations: [0.0, 0.49, 0.5, 1.0], colorSpace: .sRGB)?
-            .draw(in: path, angle: -90)
-
-        // Glass gloss over the top half.
-        NSGraphicsContext.current?.saveGraphicsState()
-        path.addClip()
-        let gloss = NSRect(x: r.minX, y: r.midY, width: r.width, height: r.height / 2)
-        NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.45),
-                            NSColor(calibratedWhite: 1, alpha: 0.0)])?.draw(in: gloss, angle: -90)
-        NSGraphicsContext.current?.restoreGraphicsState()
-
-        // Top inner highlight + outer border.
-        NSColor(calibratedWhite: 1, alpha: 0.45).setStroke()
-        let hi = framePath(r.insetBy(dx: 1, dy: 1), radius: 2.5)
-        hi.lineWidth = 1; hi.stroke()
-        border.withAlphaComponent(0.7).setStroke(); path.lineWidth = 1; path.stroke()
+        // Thin black outer frame (Aero style), else the accent border. (No white perimeter ring.)
+        (aero ? NSColor(calibratedWhite: 0, alpha: 0.6) : border.withAlphaComponent(0.7)).setStroke()
+        path.lineWidth = 1; path.stroke()
 
         // Label — white (accent) with a soft shadow, or dark (silver/aero).
         let style = NSMutableParagraphStyle(); style.alignment = .center
@@ -761,10 +896,10 @@ private final class Win7Button: NSControl {
             .foregroundColor: textColor,
             .paragraphStyle: style,
         ]
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.4)
-        shadow.shadowBlurRadius = 1.5
+        let shadow = NSShadow()   // white text → soft dark shadow for legibility on glass
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.5)
         shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowBlurRadius = 1.5
         attrs[.shadow] = shadow
         let s = NSAttributedString(string: title, attributes: attrs)
         s.draw(in: NSRect(x: 0, y: (bounds.height - s.size().height) / 2 + (pressed ? -0.5 : 0),
@@ -778,6 +913,7 @@ private final class RightRowButton: NSControl {
     private let title: String
     private let bold: Bool
     private let onClick: () -> Void
+    var onHover: ((Bool) -> Void)?
     private var hovering = false
 
     init(title: String, bold: Bool, action: @escaping () -> Void) {
@@ -787,8 +923,8 @@ private final class RightRowButton: NSControl {
         addTrackingArea(a)
     }
     required init?(coder: NSCoder) { fatalError() }
-    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
-    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true; onHover?(true) }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true; onHover?(false) }
     override func mouseDown(with event: NSEvent) { onClick() }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -842,10 +978,12 @@ private final class LeftRowButton: NSControl {
     override func mouseDown(with event: NSEvent) { onClick() }
 
     override func draw(_ dirtyRect: NSRect) {
-        // Divider line on top.
-        NSColor(calibratedWhite: 0.80, alpha: 1).setStroke()
+        // Divider line at the very top of the row (Win7 light-blue). This view isn't flipped,
+        // so the top edge is at maxY.
+        NSColor(srgbRed: 0xd6/255, green: 0xe5/255, blue: 0xf5/255, alpha: 1).setStroke()
         let line = NSBezierPath()
-        line.move(to: NSPoint(x: 4, y: 0.5)); line.line(to: NSPoint(x: bounds.width - 4, y: 0.5))
+        let ly = bounds.height - 0.5
+        line.move(to: NSPoint(x: 4, y: ly)); line.line(to: NSPoint(x: bounds.width - 4, y: ly))
         line.lineWidth = 1; line.stroke()
 
         if hovering {
