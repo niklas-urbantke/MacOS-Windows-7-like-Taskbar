@@ -25,7 +25,7 @@ enum JumpList {
             return [Action(title: "Neues Fenster") { openNew(u, args: ["-n"]) }]
         default:
             if let url = item.url, let dir = chromiumSupportDir(item.key) {
-                return chromiumProfiles(appURL: url, supportDir: dir)
+                return chromiumProfiles(appURL: url, supportDir: dir, bundleID: item.key)
             }
             return []
         }
@@ -86,28 +86,55 @@ enum JumpList {
         }
     }
 
-    private static func chromiumProfiles(appURL: URL, supportDir: String) -> [Action] {
+    private static func chromiumProfiles(appURL: URL, supportDir: String, bundleID: String) -> [Action] {
         let base = (NSHomeDirectory() as NSString)
             .appendingPathComponent("Library/Application Support/\(supportDir)")
-        let localState = (base as NSString).appendingPathComponent("Local State")
-        guard let data = FileManager.default.contents(atPath: localState),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let profile = json["profile"] as? [String: Any],
-              let cache = profile["info_cache"] as? [String: Any] else { return [] }
+        let localState = URL(fileURLWithPath: (base as NSString).appendingPathComponent("Local State"))
 
-        // Keep the browser's own profile order; append any missing ones.
-        var dirs = (profile["profiles_order"] as? [String]) ?? []
-        for key in cache.keys.sorted() where !dirs.contains(key) { dirs.append(key) }
+        // Try to read the browser's profile list. Since macOS 15/26 the profile folder is TCC-
+        // protected ("Operation not permitted") unless the app has Full Disk Access, so this can
+        // fail even though the file exists → fall back to generic window actions + a grant hint.
+        let data: Data?
+        do { data = try Data(contentsOf: localState) } catch { data = nil }
 
-        var actions: [Action] = []
-        for dir in dirs {
-            guard let info = cache[dir] as? [String: Any] else { continue }
-            let name = (info["name"] as? String) ?? dir
-            actions.append(Action(title: name) {
-                launchChromium(appURL: appURL, profileDir: dir)
+        if let data,
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let profile = json["profile"] as? [String: Any],
+           let cache = profile["info_cache"] as? [String: Any] {
+            // Keep the browser's own profile order; append any missing ones.
+            var dirs = (profile["profiles_order"] as? [String]) ?? []
+            for key in cache.keys.sorted() where !dirs.contains(key) { dirs.append(key) }
+
+            var actions: [Action] = []
+            for dir in dirs {
+                guard let info = cache[dir] as? [String: Any] else { continue }
+                let name = (info["name"] as? String) ?? dir
+                actions.append(Action(title: name) { launchChromium(appURL: appURL, profileDir: dir) })
+            }
+            if !actions.isEmpty { return actions }
+        }
+
+        // No profiles readable (not installed, or access blocked): generic fallback.
+        let privateFlag = (bundleID == "com.microsoft.edgemac") ? "--inprivate" : "--incognito"
+        var actions: [Action] = [
+            Action(title: "Neues Fenster") { openNew(appURL) },
+            Action(title: "Neues privates Fenster") { openNew(appURL, args: [privateFlag]) },
+        ]
+        // Offer to grant access so the profile list works again (macOS 26+ TCC restriction).
+        if FileManager.default.fileExists(atPath: base) {
+            actions.append(Action(title: "Profile aktivieren: Vollzugriff erlauben…") {
+                openFullDiskAccessSettings()
             })
         }
         return actions
+    }
+
+    /// Open System Settings → Privacy & Security → Full Disk Access so the user can grant the app
+    /// access to the (now TCC-protected) browser profile folders.
+    private static func openFullDiskAccessSettings() {
+        if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(u)
+        }
     }
 
     private static func launchChromium(appURL: URL, profileDir: String) {
