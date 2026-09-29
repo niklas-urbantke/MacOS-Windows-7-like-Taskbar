@@ -45,4 +45,16 @@ enum DockHelper {
     static func toggle() {
         if isHidden { showDock() } else { hideDock() }
     }
+
+    /// Das macOS-Dock ist standardmäßig aus: Beim allerersten Start (dieser Version) wird es einmal
+    /// ausgeblendet, falls es noch sichtbar ist. Danach gilt allein die Einstellung des Nutzers.
+    static func applyHiddenByDefaultOnce() {
+        let key = "dockHiddenByDefaultApplied"
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: key) else { return }
+        d.set(true, forKey: key)
+        DispatchQueue.global(qos: .utility).async {
+            if !isHidden { hideDock() }
+        }
+    }
 }

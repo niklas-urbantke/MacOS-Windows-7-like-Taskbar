@@ -55,6 +55,7 @@ final class GlassBackgroundView: NSView {
         switch Theme.taskbarStyle {
         case .vista: drawVista()
         case .win7:  drawWin7()
+        case .win11: drawWin11()
         }
 
         // Highlight while an app is dragged over the bar.
@@ -97,5 +98,14 @@ final class GlassBackgroundView: NSView {
         NSGraphicsContext.current?.imageInterpolation = .high
         // The view's alphaValue already applies `taskbarOpacity`, so draw the texture fully.
         tex.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1.0)
+    }
+
+    /// Windows 11 profile: flat (Acryl-)surface with a thin hairline on top, no gloss.
+    /// The surface colour already carries the Acryl translucency; the blur sits underneath.
+    private func drawWin11() {
+        Theme.Win11.surface(.bar).setFill()
+        bounds.fill(using: .sourceOver)
+        Theme.Win11.hairline.setFill()
+        NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill(using: .sourceOver)
     }
 }

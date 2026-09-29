@@ -7,9 +7,11 @@ final class StartOrbButton: NSControl {
     var onRightClick: (() -> Void)?
 
     /// Third orb state shows while the Start menu is open.
-    var menuOpen = false { didSet { if menuOpen != oldValue { startAnim() } } }
+    var menuOpen = false { didSet { if menuOpen != oldValue { stateChanged() } } }
 
     private var hovering = false
+    /// Win11: mouse is down on the button (logo springs in until mouseUp).
+    private var pressing = false
 
     // Animated state, eased each tick toward its target.
     private var glow: CGFloat = 0          // 0…1 hover (middle state)
@@ -39,22 +41,37 @@ final class StartOrbButton: NSControl {
                                   options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                   owner: self, userInfo: nil)
         addTrackingArea(area)
+        // Win11-Logo und Hover-Flächen hängen an der Akzentfarbe bzw. dem Farbmodus.
+        NotificationCenter.default.addObserver(self, selector: #selector(systemColorsChanged),
+                                               name: NSColor.systemColorsDidChangeNotification, object: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    @objc private func systemColorsChanged() { needsDisplay = true }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     // MARK: - Interaction
 
-    override func mouseEntered(with event: NSEvent) { hovering = true; startAnim() }
-    override func mouseExited(with event: NSEvent) { hovering = false; startAnim() }
+    override func mouseEntered(with event: NSEvent) { hovering = true; stateChanged() }
+    override func mouseExited(with event: NSEvent) { hovering = false; pressing = false; stateChanged() }
 
     override func mouseDown(with event: NSEvent) {
+        if Theme.isWin11 { pressing = true; needsDisplay = true }
         if let action = action { NSApp.sendAction(action, to: target, from: self) }
+    }
+    override func mouseUp(with event: NSEvent) {
+        if pressing { pressing = false; needsDisplay = true }
     }
     override func rightMouseDown(with event: NSEvent) { onRightClick?() }
 
     // MARK: - Animation loop
+
+    /// Hover / menu state changed: Vista/Win7 ease via the animation loop, Win11 just redraws.
+    private func stateChanged() {
+        if Theme.isWin11 { needsDisplay = true } else { startAnim() }
+    }
 
     private func startAnim() {
         guard anim == nil else { return }
@@ -82,6 +99,9 @@ final class StartOrbButton: NSControl {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        // Windows 11: flat start button with the four-square logo (OrbCatalog is ignored).
+        if Theme.isWin11 { drawWin11(); return }
+
         // Original Windows 7 orb selected: crossfade the three state PNGs (normal → hover → menu-open).
         if OrbCatalog.selectedFile == OrbCatalog.win7Token, let orbs = win7Orbs {
             let d = bounds.height * 1.34
@@ -190,6 +210,43 @@ final class StartOrbButton: NSControl {
     }
 
     private func d(_ r: NSRect) -> CGFloat { r.width }
+
+    // MARK: - Windows 11
+
+    private func drawWin11() {
+        typealias W = Theme.Win11
+        // Hover-/Open-Feld in Größe eines App-Slots, mittig in der Leiste.
+        let slotW = min(bounds.width, W.slotWidth), slotH = min(bounds.height, W.slotHeight)
+        let slot = NSRect(x: (bounds.width - slotW) / 2, y: (bounds.height - slotH) / 2,
+                          width: slotW, height: slotH)
+        let r = W.buttonRadius
+        if menuOpen {
+            W.activeFill.setFill()
+            NSBezierPath(roundedRect: slot, xRadius: r, yRadius: r).fill()
+            if hovering {
+                W.hoverFill.setFill()
+                NSBezierPath(roundedRect: slot, xRadius: r, yRadius: r).fill()
+            }
+        } else if hovering {
+            (pressing ? W.pressedFill : W.hoverFill).setFill()
+            NSBezierPath(roundedRect: slot, xRadius: r, yRadius: r).fill()
+        }
+
+        // Logo: vier gleich große Quadrate mit schmalem Spalt, beim Drücken eingefedert.
+        let size = W.startLogoSize * (pressing ? 0.85 : 1)
+        let gap = max(1, (size * 0.07).rounded())
+        let pane = (size - gap) / 2
+        let ox = (bounds.width - size) / 2, oy = (bounds.height - size) / 2
+        let logo = NSBezierPath()
+        for (col, row) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            logo.appendRect(NSRect(x: ox + CGFloat(col) * (pane + gap), y: oy + CGFloat(row) * (pane + gap),
+                                   width: pane, height: pane))
+        }
+        // Leichter Helligkeitsverlauf über das ganze Logo (oben etwas heller).
+        let base = W.accent.usingColorSpace(.sRGB) ?? W.accent
+        let top = base.blended(withFraction: 0.28, of: .white) ?? base
+        NSGradient(colors: [top, base])?.draw(in: logo, angle: -90)
+    }
 
     /// Four coloured panes (red/green/blue/yellow) arranged as the Windows flag, slightly tilted.
     private func drawFlag(in rect: NSRect) {

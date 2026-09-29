@@ -25,11 +25,11 @@ enum Theme {
     static var buttonHeight: CGFloat { s(56) }
     static var buttonSpacing: CGFloat { s(2) }
     static var iconSize: CGFloat { s(56) }
-    static var clockWidth: CGFloat { s(92) }
+    static var clockWidth: CGFloat { s(clockShowsSeconds ? 110 : 92) }
     static var showDesktopWidth: CGFloat { s(23) }
 
     // Taskleisten-Stil-Profil (Glas-Optik + empfohlene Blur-/Deckkraftwerte).
-    enum TaskbarStyle: String { case vista, win7 }
+    enum TaskbarStyle: String { case vista, win7, win11 }
     static var taskbarStyle: TaskbarStyle {
         TaskbarStyle(rawValue: UserDefaults.standard.string(forKey: "taskbarStyle") ?? "vista") ?? .vista
     }
@@ -100,4 +100,162 @@ enum Theme {
     static let leftHover = NSColor(calibratedRed: 0.83, green: 0.91, blue: 0.99, alpha: 1.0)
     static let leftHoverStroke = NSColor(calibratedRed: 0.55, green: 0.74, blue: 0.95, alpha: 1.0)
     static let rightHover = NSColor(calibratedWhite: 1.0, alpha: 0.22)
+}
+
+// MARK: - Clock & screens
+
+extension Notification.Name {
+    /// Posted when the taskbars must be recreated (e.g. "show on all screens" toggled).
+    static let taskbarRebuildScreens = Notification.Name("de.batix.win7taskbar.rebuildScreens")
+}
+
+extension Theme {
+    /// Uhr mit Sekunden (Standard: an).
+    static var clockShowsSeconds: Bool {
+        UserDefaults.standard.object(forKey: "clockSeconds") == nil ? true : UserDefaults.standard.bool(forKey: "clockSeconds")
+    }
+
+    /// Fenstervorschau beim Hovern: eigene Vorschau, DockDoor (per AppleScript) oder aus.
+    enum PreviewMode: String { case builtin, dockdoor, off }
+    static let dockDoorBundleID = "com.ethanbills.DockDoor"
+    static var isDockDoorInstalled: Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: dockDoorBundleID) != nil
+    }
+    /// Standard: DockDoor, wenn installiert, sonst die eigene Vorschau.
+    static var previewMode: PreviewMode {
+        if let raw = UserDefaults.standard.string(forKey: "previewMode"), let m = PreviewMode(rawValue: raw) { return m }
+        return isDockDoorInstalled ? .dockdoor : .builtin
+    }
+    /// Taskleiste auf allen Bildschirmen (Standard: an). Nebenbildschirme ohne Medien/Leistung.
+    static var showOnAllScreens: Bool {
+        UserDefaults.standard.object(forKey: "allScreens") == nil ? true : UserDefaults.standard.bool(forKey: "allScreens")
+    }
+}
+
+// MARK: - Windows 11 profile
+
+extension Theme {
+    static var isWin11: Bool { taskbarStyle == .win11 }
+
+    /// Farbmodus des Win11-Profils: System (Standard), Hell oder Dunkel.
+    enum Win11Appearance: String { case system, light, dark }
+    static var win11Appearance: Win11Appearance {
+        Win11Appearance(rawValue: UserDefaults.standard.string(forKey: "win11Appearance") ?? "") ?? .system
+    }
+    /// Effective dark/light for the Win11 profile (System follows the macOS appearance).
+    static var win11Dark: Bool {
+        switch win11Appearance {
+        case .light: return false
+        case .dark: return true
+        case .system: return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        }
+    }
+    static var win11NSAppearance: NSAppearance {
+        NSAppearance(named: win11Dark ? .darkAqua : .aqua) ?? NSAppearance.currentDrawing()
+    }
+    /// Acryl-Look: everything slightly translucent (blur behind). Off = opaque surfaces. Default on.
+    static var win11Acrylic: Bool {
+        UserDefaults.standard.object(forKey: "win11Acrylic") == nil ? true : UserDefaults.standard.bool(forKey: "win11Acrylic")
+    }
+    /// Icon alignment: centred (Win11 default) or left.
+    static var win11Centered: Bool { UserDefaults.standard.string(forKey: "win11Alignment") != "left" }
+
+    /// Metrics and palette of the Windows 11 look. Metrics are designed at a 48 px bar and scale
+    /// with the configured bar height (`Win11.s`), independent of the 60 px Win7 reference.
+    enum Win11 {
+        static let referenceHeight: CGFloat = 48
+        static var k: CGFloat { Theme.barHeight / referenceHeight }
+        static func s(_ base: CGFloat) -> CGFloat { (base * k).rounded() }
+        static func font(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+            NSFont.systemFont(ofSize: size * k, weight: weight)
+        }
+
+        /// Icon size of the macOS Dock (`com.apple.dock tilesize`), default 48.
+        static var dockTileSize: CGFloat {
+            let v = CFPreferencesCopyAppValue("tilesize" as CFString, "com.apple.dock" as CFString) as? Double ?? 48
+            return CGFloat(min(96, max(24, v)))
+        }
+        /// Recommended bar height derived from the Dock size: icons at about 83 % of the Dock icons
+        /// (icon = 75 % of the bar), e.g. Dock 54 → bar 60 with 45 px icons.
+        static var recommendedBarHeight: CGFloat {
+            min(Theme.maxHeight, max(Theme.minHeight, (dockTileSize * 0.83 / 0.75).rounded()))
+        }
+
+        // Taskbar metrics (scaled). Icons fill 75 % of the bar.
+        static var iconSize: CGFloat { s(36) }
+        static var slotWidth: CGFloat { s(46) }
+        static var slotHeight: CGFloat { s(44) }
+        static var slotSpacing: CGFloat { s(3) }
+        static var startWidth: CGFloat { s(46) }
+        static var startLogoSize: CGFloat { s(22) }
+        static var buttonRadius: CGFloat { max(3, s(4)) }
+        static var pillHeight: CGFloat { max(2, s(3)) }
+        static var pillShort: CGFloat { s(6) }
+        static var pillLong: CGFloat { s(16) }
+        static var showDesktopWidth: CGFloat { s(8) }
+        /// The tray text grows only half as fast as the bar (see `Win11TrayDraw.tk`), so does the clock.
+        static var clockWidth: CGFloat {
+            ((Theme.clockShowsSeconds ? 86 : 78) * (1 + (k - 1) * 0.5)).rounded()
+        }
+        // Panels (start menu, flyouts) are not scaled.
+        static let panelRadius: CGFloat = 8
+
+        // MARK: Palette (dark / light)
+
+        private static var dark: Bool { Theme.win11Dark }
+        private static func mono(_ white: CGFloat, _ alpha: CGFloat) -> NSColor {
+            NSColor(calibratedWhite: white, alpha: alpha)
+        }
+
+        /// The three Acryl surfaces. Same effect by default, each adjustable on its own.
+        enum Surface: String, CaseIterable { case bar, menu, flyout }
+
+        static let defaultFrost: CGFloat = 0.88
+        static let defaultTint: CGFloat = 0.25
+        private static func stored(_ key: String, _ fallback: CGFloat) -> CGFloat {
+            guard let v = UserDefaults.standard.object(forKey: key) as? Double else { return fallback }
+            return CGFloat(min(1, max(0, v)))
+        }
+        /// Frost (the grainy blur layer) of a surface, 0…1.
+        static func frost(_ role: Surface) -> CGFloat { stored("win11Frost.\(role.rawValue)", defaultFrost) }
+        /// Tönung (opacity of the colour layer above the frost) of a surface, 0…1.
+        static func tint(_ role: Surface) -> CGFloat { stored("win11Tint.\(role.rawValue)", defaultTint) }
+
+        /// Base fill of a surface: the tint colour with the surface's Tönung (opaque when Acryl is off).
+        /// Light mode gets a little more tint, otherwise dark text loses contrast.
+        static func surface(_ role: Surface) -> NSColor {
+            let on = Theme.win11Acrylic
+            let t = tint(role)
+            let white: CGFloat = role == .bar ? (dark ? 0.11 : 0.94) : (dark ? 0.16 : 0.95)
+            return mono(white, on ? (dark ? t : min(1, t + 0.08)) : 1)
+        }
+        /// Configures the frost layer of a Win11 surface (hidden when Acryl is off).
+        static func configureBlur(_ v: NSVisualEffectView, for role: Surface = .menu) {
+            v.material = .underWindowBackground
+            v.blendingMode = .behindWindow
+            v.state = .active
+            v.appearance = Theme.win11NSAppearance
+            v.alphaValue = frost(role)
+            v.isHidden = !Theme.win11Acrylic
+        }
+
+        static var hoverFill: NSColor { dark ? mono(1, 0.08) : mono(0, 0.05) }
+        static var pressedFill: NSColor { dark ? mono(1, 0.05) : mono(0, 0.03) }
+        static var activeFill: NSColor { dark ? mono(1, 0.12) : mono(1, 0.70) }
+        static var activeStroke: NSColor { dark ? mono(1, 0.06) : mono(0, 0.06) }
+        /// Subtle fill for controls (search pill, sliders' track, tiles).
+        static var controlFill: NSColor { dark ? mono(1, 0.06) : mono(1, 0.75) }
+        static var controlStroke: NSColor { dark ? mono(1, 0.08) : mono(0, 0.08) }
+        static var runningPill: NSColor { dark ? mono(1, 0.55) : mono(0, 0.45) }
+        static var hairline: NSColor { dark ? mono(1, 0.08) : mono(0, 0.08) }
+        static var panelStroke: NSColor { dark ? mono(1, 0.10) : mono(0, 0.10) }
+        static var textPrimary: NSColor { dark ? mono(1, 0.96) : mono(0, 0.90) }
+        static var textSecondary: NSColor { dark ? mono(1, 0.64) : mono(0, 0.60) }
+        static var textDisabled: NSColor { dark ? mono(1, 0.30) : mono(0, 0.28) }
+        /// System accent colour, lifted a bit in dark mode (like Win11 does).
+        static var accent: NSColor { dark ? Theme.accent(brightness: 1.25, saturation: 0.8) : Theme.accent }
+        /// Text/icon colour on top of an accent fill.
+        static var onAccent: NSColor { dark ? mono(0, 0.92) : mono(1, 1) }
+        static var warning: NSColor { NSColor.systemOrange }
+    }
 }

@@ -13,6 +13,8 @@ final class SettingsWindowController: NSObject {
     private let wifiBox = NSButton(checkboxWithTitle: "WLAN-Symbol anzeigen", target: nil, action: nil)
     private let monitorBox = NSButton(checkboxWithTitle: "Hardware-Monitor (CPU/RAM) anzeigen", target: nil, action: nil)
     private let autostartBox = NSButton(checkboxWithTitle: "Beim Anmelden automatisch starten", target: nil, action: nil)
+    private let secondsBox = NSButton(checkboxWithTitle: "Uhr mit Sekunden", target: nil, action: nil)
+    private let allScreensBox = NSButton(checkboxWithTitle: "Taskleiste auf allen Bildschirmen (Nebenbildschirme ohne Medien und Leistung)", target: nil, action: nil)
     private let finderDesktopBox = NSButton(checkboxWithTitle: "Finder-Desktopfenster nicht als Fenster zählen", target: nil, action: nil)
     private let fullHeightBox = NSButton(checkboxWithTitle: "Icon-Rahmen über volle Höhe", target: nil, action: nil)
     private let orbPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -30,7 +32,28 @@ final class SettingsWindowController: NSObject {
 
     // Taskleisten-Stil-Profil.
     private let taskbarStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let taskbarStyles: [(label: String, value: String)] = [("Windows Vista", "vista"), ("Windows 7", "win7")]
+    private let taskbarStyles: [(label: String, value: String)] = [("Windows Vista", "vista"), ("Windows 7", "win7"), ("Windows 11", "win11")]
+
+    // Fenstervorschau beim Hovern.
+    private let previewPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let previewModes: [(label: String, value: String)] = [
+        ("DockDoor", "dockdoor"), ("Eigene Vorschau", "builtin"), ("Aus", "off")]
+
+    // Windows-11-Profil: Farbmodus, Ausrichtung, Acryl-Look.
+    private let win11AppearancePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let win11Appearances: [(label: String, value: String)] = [("System", "system"), ("Hell", "light"), ("Dunkel", "dark")]
+    private let win11AlignmentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let win11Alignments: [(label: String, value: String)] = [("Zentriert", "center"), ("Links", "left")]
+    private let win11AcrylicBox = NSButton(checkboxWithTitle: "Acryl-Look", target: nil, action: nil)
+    // Acryl je Fläche: (Fläche, Frost-Regler, Frost-Wert, Tönungs-Regler, Tönungs-Wert).
+    private let acrylicSurfaces: [(role: Theme.Win11.Surface, label: String)] = [
+        (.bar, "Leiste"), (.menu, "Startmenü"), (.flyout, "Flyouts (Kalender, Medien, Vorschau)")]
+    private var frostSliders: [NSSlider] = []
+    private var frostLabels: [NSTextField] = []
+    private var tintSliders: [NSSlider] = []
+    private var tintLabels: [NSTextField] = []
+    // Controls that only apply to Vista/Win7 (disabled in the Win11 profile).
+    private var classicOnlyControls: [NSControl] = []
 
     // Transparenz / Unschärfe (getrennt für Taskleiste und Startmenü).
     private let taskbarOpacitySlider = NSSlider(frame: .zero)
@@ -54,8 +77,9 @@ final class SettingsWindowController: NSObject {
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 330),
-                         styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 470),
+                         styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        w.contentMinSize = NSSize(width: 560, height: 320)
         w.title = "Windows 7 Taskleiste – Einstellungen"
         w.isReleasedWhenClosed = false
 
@@ -84,12 +108,14 @@ final class SettingsWindowController: NSObject {
         styleRow.spacing = 8
 
         // Bar height.
-        heightSlider.isContinuous = false   // apply on release (relayout is heavy)
+        heightSlider.isContinuous = true    // label follows live; the relayout runs on release
         heightSlider.target = self
         heightSlider.action = #selector(heightChanged)
         heightSlider.translatesAutoresizingMaskIntoConstraints = false
         heightSlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
-        let heightRow = NSStackView(views: [NSTextField(labelWithString: "Leistenhöhe:"), heightSlider, heightLabel])
+        let dockSizeButton = NSButton(title: "Passend zum Dock", target: self, action: #selector(matchDockSize))
+        dockSizeButton.bezelStyle = .rounded
+        let heightRow = NSStackView(views: [NSTextField(labelWithString: "Leistenhöhe:"), heightSlider, heightLabel, dockSizeButton])
         heightRow.orientation = .horizontal
         heightRow.spacing = 8
 
@@ -101,6 +127,58 @@ final class SettingsWindowController: NSObject {
         let tbStyleRow = NSStackView(views: [NSTextField(labelWithString: "Stil-Profil:"), taskbarStylePopup])
         tbStyleRow.orientation = .horizontal
         tbStyleRow.spacing = 8
+
+        // Windows-11-Optionen.
+        let win11Header = NSTextField(labelWithString: "Windows 11")
+        win11Header.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        win11AppearancePopup.removeAllItems()
+        win11AppearancePopup.addItems(withTitles: win11Appearances.map { $0.label })
+        win11AppearancePopup.target = self
+        win11AppearancePopup.action = #selector(win11AppearanceChanged)
+        win11AlignmentPopup.removeAllItems()
+        win11AlignmentPopup.addItems(withTitles: win11Alignments.map { $0.label })
+        win11AlignmentPopup.target = self
+        win11AlignmentPopup.action = #selector(win11AlignmentChanged)
+        win11AcrylicBox.target = self
+        win11AcrylicBox.action = #selector(win11AcrylicChanged)
+        // Acryl-Tabelle: je Fläche ein Frost- und ein Tönungs-Regler (tag = Index der Fläche).
+        func acrylicSlider(_ action: Selector, tag: Int) -> NSSlider {
+            let sl = NSSlider(frame: .zero)
+            sl.minValue = 0
+            sl.maxValue = 1
+            sl.isContinuous = true    // label follows live; the change applies on release
+            sl.target = self
+            sl.action = action
+            sl.tag = tag
+            sl.translatesAutoresizingMaskIntoConstraints = false
+            sl.widthAnchor.constraint(equalToConstant: 140).isActive = true
+            return sl
+        }
+        func valueLabel() -> NSTextField {
+            let l = NSTextField(labelWithString: "")
+            l.translatesAutoresizingMaskIntoConstraints = false
+            l.widthAnchor.constraint(equalToConstant: 40).isActive = true
+            return l
+        }
+        let frostHead = NSTextField(labelWithString: "Frost")
+        let tintHead = NSTextField(labelWithString: "Tönung")
+        var gridRows: [[NSView]] = [[win11AcrylicBox, frostHead, NSGridCell.emptyContentView, tintHead, NSGridCell.emptyContentView]]
+        for (i, s) in acrylicSurfaces.enumerated() {
+            let fs = acrylicSlider(#selector(frostChanged(_:)), tag: i), fl = valueLabel()
+            let ts = acrylicSlider(#selector(tintChanged(_:)), tag: i), tl = valueLabel()
+            frostSliders.append(fs); frostLabels.append(fl)
+            tintSliders.append(ts); tintLabels.append(tl)
+            gridRows.append([NSTextField(labelWithString: s.label + ":"), fs, fl, ts, tl])
+        }
+        let acrylicGrid = NSGridView(views: gridRows)
+        acrylicGrid.rowSpacing = 8
+        acrylicGrid.columnSpacing = 8
+        let resetAcrylic = NSButton(title: "Acryl zurücksetzen", target: self, action: #selector(resetAcrylic))
+        resetAcrylic.bezelStyle = .rounded
+        let win11Row = NSStackView(views: [NSTextField(labelWithString: "Farbmodus:"), win11AppearancePopup,
+                                           NSTextField(labelWithString: "Ausrichtung:"), win11AlignmentPopup])
+        win11Row.orientation = .horizontal
+        win11Row.spacing = 8
 
         // Transparenz / Unschärfe – je ein Regler (0–100 %) für Taskleiste und Startmenü.
         let tbOpacityRow = makeSurfaceRow("Deckkraft:", taskbarOpacitySlider, taskbarOpacityLabel,
@@ -119,7 +197,7 @@ final class SettingsWindowController: NSObject {
         menuHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
 
         for box in [dockBox, reserveBox, finderBox, finderDesktopBox, nowPlayingBox,
-                    wifiBox, monitorBox, autostartBox, fullHeightBox] {
+                    wifiBox, monitorBox, autostartBox, fullHeightBox, secondsBox, allScreensBox] {
             box.target = self
             box.action = #selector(changed(_:))
         }
@@ -160,12 +238,28 @@ final class SettingsWindowController: NSObject {
         // Categorised tabs.
         let tabView = NSTabView()
         tabView.translatesAutoresizingMaskIntoConstraints = false
-        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox, hotkeyRow]))
-        tabView.addTabViewItem(makeTab("Darstellung", [orbRow, styleRow, heightRow, fullHeightBox]))
+        let dockPinsButton = NSButton(title: "Angeheftete Dock-Apps übernehmen", target: self, action: #selector(importDockPins))
+        dockPinsButton.bezelStyle = .rounded
+        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox, allScreensBox, hotkeyRow, dockPinsButton]))
+        previewPopup.removeAllItems()
+        previewPopup.addItems(withTitles: previewModes.map { $0.label })
+        previewPopup.target = self
+        previewPopup.action = #selector(previewModeChanged)
+        let previewHint = NSTextField(labelWithString: "DockDoor zeigt seine Vorschau dann auch für diese Taskleiste.")
+        previewHint.textColor = .secondaryLabelColor
+        previewHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let previewRow = NSStackView(views: [NSTextField(labelWithString: "Fenstervorschau:"), previewPopup, previewHint])
+        previewRow.orientation = .horizontal
+        previewRow.spacing = 8
+        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, previewRow, orbRow, styleRow, heightRow, fullHeightBox,
+                                                       win11Header, win11Row, acrylicGrid, resetAcrylic]))
         tabView.addTabViewItem(makeTab("Transparenz",
-                                       [tbHeader, tbStyleRow, tbOpacityRow, tbBlurRow, tbGlassRow,
+                                       [tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
                                         menuHeader, menuOpacityRow, menuBlurRow]))
-        tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox]))
+        classicOnlyControls = [orbPopup, addButton, folderButton, menuStylePopup, menuEditButton, fullHeightBox, wifiBox,
+                               taskbarOpacitySlider, taskbarBlurSlider, win7GlassSlider,
+                               menuOpacitySlider, menuBlurSlider]
+        tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox, secondsBox]))
         tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox, finderIconRow]))
 
         let quit = NSButton(title: "Taskleiste beenden", target: self, action: #selector(quitAction))
@@ -187,6 +281,8 @@ final class SettingsWindowController: NSObject {
         window = w
     }
 
+    /// A tab whose content scrolls vertically, so nothing is cut off when a tab holds more rows
+    /// than the window is tall.
     private func makeTab(_ title: String, _ views: [NSView]) -> NSTabViewItem {
         let item = NSTabViewItem(identifier: title)
         item.label = title
@@ -195,12 +291,34 @@ final class SettingsWindowController: NSObject {
         stack.alignment = .leading
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let doc = FlippedView()   // top-down, so the content starts at the top of the scroll view
+        doc.translatesAutoresizingMaskIntoConstraints = false
+        doc.addSubview(stack)
+
+        let scroll = NSScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.documentView = doc
+
         let v = NSView()
-        v.addSubview(stack)
+        v.addSubview(scroll)
+        let clip = scroll.contentView
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 16),
-            stack.topAnchor.constraint(equalTo: v.topAnchor, constant: 16),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: v.trailingAnchor, constant: -16),
+            scroll.leadingAnchor.constraint(equalTo: v.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: v.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: v.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: v.bottomAnchor),
+            doc.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            doc.topAnchor.constraint(equalTo: clip.topAnchor),
+            doc.widthAnchor.constraint(equalTo: clip.widthAnchor),
+            stack.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: doc.topAnchor, constant: 16),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: doc.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -16),
         ])
         item.view = v
         return item
@@ -258,6 +376,14 @@ final class SettingsWindowController: NSObject {
         wifiBox.state = c.wifiEnabled ? .on : .off
         monitorBox.state = c.monitorEnabled ? .on : .off
         autostartBox.state = c.autostartEnabled ? .on : .off
+        secondsBox.state = c.clockSeconds ? .on : .off
+        if let idx = previewModes.firstIndex(where: { $0.value == c.previewMode }) {
+            previewPopup.selectItem(at: idx)
+        }
+        // DockDoor only selectable when installed.
+        previewPopup.item(at: 0)?.isEnabled = Theme.isDockDoorInstalled
+        previewPopup.autoenablesItems = false
+        allScreensBox.state = c.showOnAllScreens ? .on : .off
         hotkeyButton.title = c.startHotkeyLabel
         updateFinderIconStatus()
         finderDesktopBox.state = c.hideFinderDesktopEnabled ? .on : .off
@@ -286,12 +412,84 @@ final class SettingsWindowController: NSObject {
         menuOpacityLabel.stringValue = percent(Double(c.menuOpacity))
         menuBlurSlider.doubleValue = Double(c.menuBlur)
         menuBlurLabel.stringValue = percent(Double(c.menuBlur))
+
+        if let idx = win11Appearances.firstIndex(where: { $0.value == c.win11Appearance }) {
+            win11AppearancePopup.selectItem(at: idx)
+        }
+        if let idx = win11Alignments.firstIndex(where: { $0.value == c.win11Alignment }) {
+            win11AlignmentPopup.selectItem(at: idx)
+        }
+        win11AcrylicBox.state = c.win11Acrylic ? .on : .off
+        for (i, s) in acrylicSurfaces.enumerated() {
+            frostSliders[i].doubleValue = Double(c.win11Frost(s.role))
+            frostLabels[i].stringValue = percent(frostSliders[i].doubleValue)
+            tintSliders[i].doubleValue = Double(c.win11Tint(s.role))
+            tintLabels[i].stringValue = percent(tintSliders[i].doubleValue)
+        }
+
+        // Profile-specific controls: Win11 options only in the Win11 profile, the classic ones otherwise.
+        let win11 = c.taskbarStyle == "win11"
+        classicOnlyControls.forEach { $0.isEnabled = !win11 }
+        [win11AppearancePopup, win11AlignmentPopup, win11AcrylicBox].forEach { $0.isEnabled = win11 }
+        (frostSliders + tintSliders).forEach { $0.isEnabled = win11 && c.win11Acrylic }
+    }
+
+    @objc private func previewModeChanged() {
+        let i = previewPopup.indexOfSelectedItem
+        guard i >= 0, i < previewModes.count else { return }
+        controller?.setPreviewMode(previewModes[i].value)
+    }
+
+    @objc private func matchDockSize() {
+        controller?.matchDockSize()
+        syncFromController()
+    }
+    @objc private func importDockPins() { controller?.importDockPins() }
+
+    @objc private func win11AppearanceChanged() {
+        let i = win11AppearancePopup.indexOfSelectedItem
+        guard i >= 0, i < win11Appearances.count else { return }
+        controller?.setWin11Appearance(win11Appearances[i].value)
+    }
+    @objc private func win11AlignmentChanged() {
+        let i = win11AlignmentPopup.indexOfSelectedItem
+        guard i >= 0, i < win11Alignments.count else { return }
+        controller?.setWin11Alignment(win11Alignments[i].value)
+    }
+    @objc private func win11AcrylicChanged() {
+        controller?.setWin11Acrylic(win11AcrylicBox.state == .on)
+        (frostSliders + tintSliders).forEach { $0.isEnabled = win11AcrylicBox.state == .on }
+    }
+    @objc private func frostChanged(_ sender: NSSlider) {
+        frostLabels[sender.tag].stringValue = percent(sender.doubleValue)
+        guard sliderReleased else { return }
+        controller?.setWin11Frost(CGFloat(sender.doubleValue), for: acrylicSurfaces[sender.tag].role)
+    }
+    @objc private func tintChanged(_ sender: NSSlider) {
+        tintLabels[sender.tag].stringValue = percent(sender.doubleValue)
+        guard sliderReleased else { return }
+        controller?.setWin11Tint(CGFloat(sender.doubleValue), for: acrylicSurfaces[sender.tag].role)
+    }
+    /// Alle drei Flächen auf den gemeinsamen Standard (Frost 88 %, Tönung 25 %).
+    @objc private func resetAcrylic() {
+        for s in acrylicSurfaces {
+            controller?.setWin11Frost(Theme.Win11.defaultFrost, for: s.role)
+            controller?.setWin11Tint(Theme.Win11.defaultTint, for: s.role)
+        }
+        syncFromController()
+    }
+
+    /// True when the slider action comes from letting go of the knob (or a click/keyboard step),
+    /// false while dragging. Heavy changes only apply then.
+    private var sliderReleased: Bool {
+        NSApp.currentEvent?.type != .leftMouseDragged
     }
 
     @objc private func heightChanged() {
         let v = heightSlider.doubleValue.rounded()
-        controller?.setBarHeight(CGFloat(v))
         heightLabel.stringValue = "\(Int(v)) px"
+        guard sliderReleased else { return }
+        controller?.setBarHeight(CGFloat(v))
     }
 
     @objc private func orbChanged() {
@@ -448,6 +646,10 @@ final class SettingsWindowController: NSObject {
             c.setHideFinderDesktop(on)
         case fullHeightBox:
             c.setFullHeightIcons(on)
+        case secondsBox:
+            c.setClockSeconds(on)
+        case allScreensBox:
+            c.setShowOnAllScreens(on)
         default:
             break
         }
