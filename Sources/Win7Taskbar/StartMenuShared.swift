@@ -163,12 +163,15 @@ enum StartMenuPower {
             case .logout:   return "Abmelden"
             }
         }
+        /// Restart, shut down and log out go through loginwindow, which shows the normal macOS
+        /// confirmation dialog (with "Fenster beim erneuten Anmelden wieder öffnen" and the
+        /// countdown), exactly like the Apple menu. System Events would skip that dialog.
         var script: String {
             switch self {
             case .sleep:    return "tell application \"System Events\" to sleep"
-            case .restart:  return "tell application \"System Events\" to restart"
-            case .shutdown: return "tell application \"System Events\" to shut down"
-            case .logout:   return "tell application \"System Events\" to log out"
+            case .restart:  return "tell application \"loginwindow\" to «event aevtrrst»"
+            case .shutdown: return "tell application \"loginwindow\" to «event aevtrsdn»"
+            case .logout:   return "tell application \"loginwindow\" to «event aevtlogo»"
             }
         }
     }

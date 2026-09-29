@@ -525,9 +525,9 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         case .helpApple:       openURL("https://support.apple.com/de-de")
         case .sleep:           runOSA("tell application \"System Events\" to sleep")
         case .lock:            runOSA("tell application \"System Events\" to keystroke \"q\" using {command down, control down}")
-        case .logout:          runOSA("tell application \"System Events\" to log out")
-        case .restart:         runOSA("tell application \"System Events\" to restart")
-        case .shutdown:        runOSA("tell application \"System Events\" to shut down")
+        case .logout:          runOSA(StartMenuPower.Action.logout.script)
+        case .restart:         runOSA(StartMenuPower.Action.restart.script)
+        case .shutdown:        runOSA(StartMenuPower.Action.shutdown.script)
         }
     }
 
