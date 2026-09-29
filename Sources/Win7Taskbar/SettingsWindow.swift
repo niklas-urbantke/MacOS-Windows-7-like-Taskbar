@@ -39,7 +39,7 @@ final class SettingsWindowController: NSObject {
     private let previewModes: [(label: String, value: String)] = [
         ("DockDoor", "dockdoor"), ("Eigene Vorschau", "builtin"), ("Aus", "off")]
 
-    // Windows-11-Profil: Farbmodus, Ausrichtung, Acryl-Look.
+    // Farbmodus (alle Profile); Ausrichtung und Acryl-Look nur im Windows-11-Profil.
     private let win11AppearancePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let win11Appearances: [(label: String, value: String)] = [("System", "system"), ("Hell", "light"), ("Dunkel", "dark")]
     private let win11AlignmentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -175,8 +175,10 @@ final class SettingsWindowController: NSObject {
         acrylicGrid.columnSpacing = 8
         let resetAcrylic = NSButton(title: "Acryl zurücksetzen", target: self, action: #selector(resetAcrylic))
         resetAcrylic.bezelStyle = .rounded
-        let win11Row = NSStackView(views: [NSTextField(labelWithString: "Farbmodus:"), win11AppearancePopup,
-                                           NSTextField(labelWithString: "Ausrichtung:"), win11AlignmentPopup])
+        let appearanceRow = NSStackView(views: [NSTextField(labelWithString: "Farbmodus:"), win11AppearancePopup])
+        appearanceRow.orientation = .horizontal
+        appearanceRow.spacing = 8
+        let win11Row = NSStackView(views: [NSTextField(labelWithString: "Ausrichtung:"), win11AlignmentPopup])
         win11Row.orientation = .horizontal
         win11Row.spacing = 8
 
@@ -251,7 +253,7 @@ final class SettingsWindowController: NSObject {
         let previewRow = NSStackView(views: [NSTextField(labelWithString: "Fenstervorschau:"), previewPopup, previewHint])
         previewRow.orientation = .horizontal
         previewRow.spacing = 8
-        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, previewRow, orbRow, styleRow, heightRow, fullHeightBox,
+        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, appearanceRow, previewRow, orbRow, styleRow, heightRow, fullHeightBox,
                                                        win11Header, win11Row, acrylicGrid, resetAcrylic]))
         tabView.addTabViewItem(makeTab("Transparenz",
                                        [tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
@@ -261,6 +263,7 @@ final class SettingsWindowController: NSObject {
                                menuOpacitySlider, menuBlurSlider]
         tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox, secondsBox]))
         tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox, finderIconRow]))
+
 
         let quit = NSButton(title: "Taskleiste beenden", target: self, action: #selector(quitAction))
         quit.bezelStyle = .rounded
@@ -430,7 +433,7 @@ final class SettingsWindowController: NSObject {
         // Profile-specific controls: Win11 options only in the Win11 profile, the classic ones otherwise.
         let win11 = c.taskbarStyle == "win11"
         classicOnlyControls.forEach { $0.isEnabled = !win11 }
-        [win11AppearancePopup, win11AlignmentPopup, win11AcrylicBox].forEach { $0.isEnabled = win11 }
+        [win11AlignmentPopup, win11AcrylicBox].forEach { $0.isEnabled = win11 }   // Farbmodus gilt für alle Profile
         (frostSliders + tintSliders).forEach { $0.isEnabled = win11 && c.win11Acrylic }
     }
 

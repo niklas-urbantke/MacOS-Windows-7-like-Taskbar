@@ -180,6 +180,8 @@ final class TaskbarButton: NSControl {
                 }
                 frontBox = NSRect(x: inset.minX, y: inset.minY, width: sheetW, height: inset.height)
             }
+        } else if !Theme.isDark {
+            drawVistaLight(active: active, running: running, rect: inset, radius: radius)
         } else if active {
             // Glassy translucent highlight for the active app (no colour tint, just lifted glass).
             NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.46),
@@ -240,7 +242,7 @@ final class TaskbarButton: NSControl {
             let spacing: CGFloat = extra <= 1 ? 6 : (extra == 2 ? 5 : 4)
             NSGraphicsContext.current?.saveGraphicsState()
             path.addClip()   // keep the nested frames inside the button (left stays clean)
-            NSColor(calibratedWhite: 1, alpha: 0.32).setStroke()
+            (Theme.isDark ? NSColor(calibratedWhite: 1, alpha: 0.32) : NSColor(calibratedWhite: 0, alpha: 0.22)).setStroke()
             for i in 1...extra {
                 let off = CGFloat(i) * spacing
                 let r = NSRect(x: inset.minX - off, y: inset.minY, width: inset.width, height: inset.height)
@@ -336,6 +338,33 @@ final class TaskbarButton: NSControl {
             name = hovering ? "notRunningPointerOver" : nil   // pinned, not running: only on hover
         }
         return name.flatMap { ThemeAssets.resizable($0, caps: 8) }
+    }
+
+    /// Vista button glass on the bright (light mode) bar: white on white would vanish, so the
+    /// fields get a dark outer rim and a bright inner line, the glass itself stays milky white.
+    private func drawVistaLight(active: Bool, running: Bool, rect: NSRect, radius: CGFloat) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        let top: CGFloat, bottom: CGFloat, rim: CGFloat
+        if active {
+            (top, bottom, rim) = (hovering ? 0.95 : 0.85, hovering ? 0.60 : 0.50, 0.34)
+        } else if hovering {
+            (top, bottom, rim) = (0.70, 0.30, 0.24)
+        } else if running {
+            (top, bottom, rim) = (0.42, 0.20, 0.16)
+        } else {
+            return
+        }
+        NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: top),
+                            NSColor(calibratedWhite: 1, alpha: bottom)])?.draw(in: path, angle: -90)
+        if active || hovering { addGloss(to: rect, radius: radius) }
+        NSColor(calibratedWhite: 0, alpha: rim).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+        let inner = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1),
+                                 xRadius: max(0, radius - 1), yRadius: max(0, radius - 1))
+        NSColor(calibratedWhite: 1, alpha: active ? 0.85 : 0.6).setStroke()
+        inner.lineWidth = 1
+        inner.stroke()
     }
 
     /// Aero gloss: a bright highlight over the top half of the button.

@@ -132,6 +132,43 @@ extension Theme {
     }
 }
 
+// MARK: - Farbmodus (alle Profile) + Aero-Palette für Vista/Win7
+
+extension Theme {
+    /// Farbmodus für alle Profile (System / Hell / Dunkel). Gespeichert unter dem bisherigen
+    /// Schlüssel `win11Appearance`, damit bestehende Einstellungen erhalten bleiben.
+    static var appearanceMode: Win11Appearance { win11Appearance }
+    static var isDark: Bool { win11Dark }
+    static var nsAppearance: NSAppearance { win11NSAppearance }
+
+    /// Palette of the classic Aero profiles (Vista, Windows 7) in dark and light mode.
+    /// Dark = the familiar dark Aero glass; light = bright frosted Aero glass with dark text.
+    enum Aero {
+        private static var dark: Bool { Theme.isDark }
+        private static func mono(_ w: CGFloat, _ a: CGFloat) -> NSColor { NSColor(calibratedWhite: w, alpha: a) }
+
+        /// Text and glyphs on the taskbar and on glass panels.
+        static var text: NSColor { dark ? mono(0.96, 1) : mono(0.08, 0.92) }
+        static var secondaryText: NSColor { dark ? mono(0.85, 1) : mono(0.20, 0.72) }
+        static var disabledText: NSColor { dark ? mono(0.60, 1) : mono(0.35, 0.50) }
+        /// Extra wash drawn over the taskbar glass/texture in light mode (clear in dark mode).
+        static var barWash: NSColor { dark ? .clear : mono(1, 0.55) }
+        /// Glass panels (flyouts, window preview): vertical gradient top → bottom.
+        static var panelTop: NSColor { dark ? mono(0.30, 0.55) : mono(1.00, 0.72) }
+        static var panelBottom: NSColor { dark ? mono(0.04, 0.72) : mono(0.86, 0.82) }
+        /// Outer border and the bright inner highlight line of glass panels.
+        static var stroke: NSColor { dark ? mono(1, 0.30) : mono(0, 0.28) }
+        static var innerHighlight: NSColor { dark ? mono(1, 0.22) : mono(1, 0.85) }
+        /// Hover / pressed glass on controls inside panels and the tray.
+        static var hover: NSColor { dark ? mono(1, 0.18) : mono(1, 0.60) }
+        static var pressed: NSColor { dark ? mono(1, 0.10) : mono(0, 0.08) }
+        /// Tracks of sliders / progress bars.
+        static var track: NSColor { dark ? mono(1, 0.25) : mono(0, 0.15) }
+        /// Accent (progress fill, today marker …), lifted a bit on dark glass.
+        static var accent: NSColor { dark ? Theme.accent(brightness: 1.3) : Theme.accent }
+    }
+}
+
 // MARK: - Windows 11 profile
 
 extension Theme {

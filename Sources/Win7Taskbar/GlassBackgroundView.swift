@@ -67,8 +67,9 @@ final class GlassBackgroundView: NSView {
         }
     }
 
-    /// Original dark Aero strip (Windows Vista profile).
+    /// Windows Vista profile: the original dark Aero strip, or bright Aero glass in light mode.
     private func drawVista() {
+        guard Theme.isDark else { drawVistaLight(); return }
         let h = bounds.height
 
         let body = NSGradient(colors: [
@@ -92,12 +93,53 @@ final class GlassBackgroundView: NSView {
         NSRect(x: 0, y: h - 2, width: bounds.width, height: 1).fill()
     }
 
+    /// Light Vista glass: the same structure as the dark strip (bright upper half, the typical
+    /// step at the middle, a slightly darker lower half), but milky white over the light frost.
+    /// A dark outer line on top keeps the edge visible against bright windows.
+    private func drawVistaLight() {
+        let h = bounds.height
+
+        let body = NSGradient(colors: [
+            NSColor(calibratedWhite: 1.00, alpha: 0.62),
+            NSColor(calibratedWhite: 1.00, alpha: 0.46),
+            NSColor(calibratedWhite: 0.90, alpha: 0.40),
+            NSColor(calibratedWhite: 0.84, alpha: 0.46),
+        ], atLocations: [0.0, 0.48, 0.5, 1.0], colorSpace: .deviceRGB)
+        body?.draw(in: bounds, angle: -90)
+
+        let glossRect = NSRect(x: 0, y: h * 0.55, width: bounds.width, height: h * 0.45)
+        NSGradient(colors: [
+            NSColor(calibratedWhite: 1.0, alpha: 0.45),
+            NSColor(calibratedWhite: 1.0, alpha: 0.05),
+        ])?.draw(in: glossRect, angle: -90)
+
+        // Dark outer edge, bright inner highlight below it.
+        NSColor(calibratedWhite: 0.0, alpha: 0.26).setFill()
+        NSRect(x: 0, y: h - 1, width: bounds.width, height: 1).fill()
+        NSColor(calibratedWhite: 1.0, alpha: 0.85).setFill()
+        NSRect(x: 0, y: h - 2, width: bounds.width, height: 1).fill()
+    }
+
     /// Windows 7 profile: draw the original taskbar texture stretched to fill the bar.
+    /// Light mode: the texture plus a milky wash (`Theme.Aero.barWash`) below its two edge rows,
+    /// so the original dark/bright top edge stays crisp, like Win7 with a light glass colour.
     private func drawWin7() {
         guard let tex = ThemeAssets.image("taskbarBackground") else { return }
         NSGraphicsContext.current?.imageInterpolation = .high
         // The view's alphaValue already applies `taskbarOpacity`, so draw the texture fully.
         tex.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1.0)
+        guard !Theme.isDark else { return }
+
+        // The texture is 39 px high; its top two rows are the edge (dark line, bright line).
+        let edge = ceil(bounds.height * 2 / max(1, tex.size.height))
+        let body = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - edge))
+        Theme.Aero.barWash.setFill()
+        body.fill(using: .sourceOver)
+        // A faint gloss over the upper half, as the light Win7 glass reflects a little more.
+        NSGradient(colors: [
+            NSColor(calibratedWhite: 1.0, alpha: 0.22),
+            NSColor(calibratedWhite: 1.0, alpha: 0.0),
+        ])?.draw(in: NSRect(x: 0, y: body.midY, width: body.width, height: body.height / 2), angle: -90)
     }
 
     /// Windows 11 profile: flat (Acryl-)surface with a thin hairline on top, no gloss.

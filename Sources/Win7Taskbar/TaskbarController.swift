@@ -188,7 +188,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         blur.material = .underWindowBackground
         blur.blendingMode = .behindWindow
         blur.state = .active
-        blur.appearance = NSAppearance(named: .darkAqua)
+        blur.appearance = Theme.nsAppearance
         container.addSubview(blur)
 
         glass.frame = container.bounds
@@ -912,11 +912,12 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         startMenu11.applyAppearance()
     }
 
-    // Windows-11-Profil: Farbmodus ("system" | "light" | "dark").
-    var win11Appearance: String { Theme.win11Appearance.rawValue }
+    // Farbmodus aller Profile ("system" | "light" | "dark"), gespeichert unter dem bisherigen
+    // Win11-Schlüssel.
+    var win11Appearance: String { Theme.appearanceMode.rawValue }
     func setWin11Appearance(_ raw: String) {
         UserDefaults.standard.set(raw, forKey: "win11Appearance")
-        Self.forAll { $0.applyWin11Change() }
+        Self.forAll { $0.applyColorModeChange() }
     }
 
     // Windows-11-Profil: Acryl-Transparenz (Standard: an).
@@ -959,6 +960,14 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         startMenu11.applyAppearance()
     }
 
+    /// Farbmodus oder Akzentfarbe geändert: Leiste, beide Startmenüs und offene Popover neu anwenden
+    /// (in jedem Profil, auch das gerade nicht sichtbare Startmenü bleibt so aktuell).
+    private func applyColorModeChange() {
+        applyWin11Change()
+        startMenu.applyAppearance()
+        volumePopover.appearance = Theme.nsAppearance
+    }
+
     /// Full visual reload — rebuild the button row and redraw all chrome (used on theme switch).
     private func reloadEverything() {
         glass.needsDisplay = true
@@ -994,14 +1003,15 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             glass.alphaValue = 1
             window.appearance = Theme.win11NSAppearance   // Kontextmenüs folgen dem Farbmodus
         } else {
+            // Vista/Win7: Frost-Schicht und Kontextmenüs folgen dem Farbmodus (hell = helles Glas).
             blur.material = .underWindowBackground
             blur.blendingMode = .behindWindow
             blur.state = .active
-            blur.appearance = NSAppearance(named: .darkAqua)
+            blur.appearance = Theme.nsAppearance
             blur.isHidden = false
             blur.alphaValue = Theme.taskbarBlur
             glass.alphaValue = Theme.taskbarOpacity
-            window.appearance = nil
+            window.appearance = Theme.nsAppearance
         }
     }
 
@@ -1112,6 +1122,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         let vc = VolumePopoverVC()
         volumePopover.contentViewController = vc
         volumePopover.behavior = .transient
+        volumePopover.appearance = Theme.nsAppearance
         volumePopover.show(relativeTo: volume.bounds, of: volume, preferredEdge: .maxY)
     }
 
@@ -1138,7 +1149,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             nc.addObserver(self, selector: #selector(updateBarVisibility), name: name, object: nil)
         }
 
-        // Hell/Dunkel-Wechsel von macOS (Win11 "System" folgt ihm) und Akzentfarben-Wechsel.
+        // Hell/Dunkel-Wechsel von macOS (Farbmodus "System" folgt ihm) und Akzentfarben-Wechsel.
         DistributedNotificationCenter.default().addObserver(
             self, selector: #selector(interfaceThemeChanged),
             name: NSNotification.Name("AppleInterfaceThemeChangedNotification"), object: nil)
@@ -1156,13 +1167,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     }
 
     @objc private func systemColorsChanged() {
-        if Theme.isWin11 {
-            applyWin11Change()
-        } else {
-            // Vista/Win7 only use the accent for highlights: a redraw is enough.
-            glass.needsDisplay = true
-            glass.subviews.forEach { $0.needsDisplay = true }
-        }
+        // Every profile follows the colour mode ("System" tracks macOS) and the accent colour.
+        applyColorModeChange()
     }
 
     @objc private func appsChanged() {
@@ -1363,20 +1369,17 @@ private final class ClockView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering {
-            Theme.accent(brightness: 1.2, alpha: 0.22).setFill()
-            NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 6), xRadius: 4, yRadius: 4).fill()
-        }
+        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 2, dy: 6)) }
         let style = NSMutableParagraphStyle()
         style.alignment = .center
         let timeAttrs: [NSAttributedString.Key: Any] = [
             .font: Theme.font(14, weight: .medium),
-            .foregroundColor: NSColor.white,
+            .foregroundColor: ClassicTray.text,
             .paragraphStyle: style,
         ]
         let dateAttrs: [NSAttributedString.Key: Any] = [
             .font: Theme.font(14, weight: .medium),   // same size as the time
-            .foregroundColor: NSColor(calibratedWhite: 0.92, alpha: 1),
+            .foregroundColor: ClassicTray.pick(NSColor(calibratedWhite: 0.92, alpha: 1), Theme.Aero.text),
             .paragraphStyle: style,
         ]
         let timeStr = NSAttributedString(string: time, attributes: timeAttrs)
@@ -1423,10 +1426,10 @@ private final class ShowDesktopButton: NSView {
             return
         }
         if hovering {
-            NSColor(calibratedWhite: 1, alpha: 0.18).setFill()
+            ClassicTray.pick(NSColor(calibratedWhite: 1, alpha: 0.18), Theme.Aero.hover).setFill()
             bounds.fill()
         }
-        NSColor(calibratedWhite: 1, alpha: 0.35).setStroke()
+        ClassicTray.pick(NSColor(calibratedWhite: 1, alpha: 0.35), Theme.Aero.stroke).setStroke()
         let line = NSBezierPath()
         line.move(to: NSPoint(x: bounds.minX + 0.5, y: 4))
         line.line(to: NSPoint(x: bounds.minX + 0.5, y: bounds.height - 4))
@@ -1448,7 +1451,7 @@ private final class BatteryView: NSView {
         let style = NSMutableParagraphStyle(); style.alignment = .center
         let attrs: [NSAttributedString.Key: Any] = [
             .font: Theme.font(12, weight: .medium),
-            .foregroundColor: NSColor.white, .paragraphStyle: style,
+            .foregroundColor: ClassicTray.text, .paragraphStyle: style,
         ]
         let s = NSAttributedString(string: "\(info.percent)%", attributes: attrs)
         s.draw(in: NSRect(x: 0, y: bounds.midY - 16, width: bounds.width, height: 15))
@@ -1457,20 +1460,21 @@ private final class BatteryView: NSView {
         let bodyW: CGFloat = 26, bodyH: CGFloat = 12
         let bx = (bounds.width - bodyW) / 2, by = bounds.midY + 3
         let body = NSRect(x: bx, y: by, width: bodyW, height: bodyH)
-        NSColor(calibratedWhite: 1, alpha: 0.85).setStroke()
+        let outline = ClassicTray.pick(NSColor(calibratedWhite: 1, alpha: 0.85), Theme.Aero.secondaryText)
+        outline.setStroke()
         let bp = NSBezierPath(roundedRect: body, xRadius: 2, yRadius: 2); bp.lineWidth = 1.2; bp.stroke()
         // Cap.
-        NSColor(calibratedWhite: 1, alpha: 0.85).setFill()
+        outline.setFill()
         NSRect(x: body.maxX, y: by + 3, width: 2, height: bodyH - 6).fill()
         // Fill level.
         let level = max(0, min(1, CGFloat(info.percent) / 100))
         let fillColor = info.charging ? NSColor.systemGreen
-            : (info.percent <= 20 ? NSColor.systemRed : Theme.accent(brightness: 1.2))
+            : (info.percent <= 20 ? NSColor.systemRed : ClassicTray.pick(Theme.accent(brightness: 1.2), Theme.Aero.accent))
         fillColor.setFill()
         NSRect(x: bx + 2, y: by + 2, width: (bodyW - 4) * level, height: bodyH - 4).fill()
         if info.charging {
             let bolt = NSAttributedString(string: "⚡︎", attributes: [
-                .font: Theme.font(9), .foregroundColor: NSColor.white])
+                .font: Theme.font(9), .foregroundColor: ClassicTray.text])
             bolt.draw(at: NSPoint(x: bx + bodyW / 2 - 4, y: by + 1))
         }
     }
@@ -1496,19 +1500,11 @@ private final class TrayIconButton: NSView {
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering {
-            Theme.accent(brightness: 1.2, alpha: 0.22).setFill()
-            NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 8), xRadius: 4, yRadius: 4).fill()
-        }
+        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
         let cfg = NSImage.SymbolConfiguration(pointSize: 16 * Theme.scale, weight: .regular)
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg) {
-            let tinted = NSImage(size: img.size, flipped: false) { rect in
-                img.draw(in: rect)
-                NSColor.white.set()
-                rect.fill(using: .sourceAtop)
-                return true
-            }
+            let tinted = ClassicTray.tinted(img, ClassicTray.text)
             let s = tinted.size
             tinted.draw(in: NSRect(x: (bounds.width - s.width) / 2,
                                    y: (bounds.height - s.height) / 2, width: s.width, height: s.height))
