@@ -244,7 +244,8 @@ class Win11TrayControl: NSView {
     }
 }
 
-/// Small glyph button with Win11 hover / pressed fill (used in the tray and in the flyouts).
+/// Small glyph button with hover / pressed field (used in the tray and in the flyouts). Draws via
+/// `FlyoutLook`: Win11 flat fill, or Aero glass when the media flyout is open in Vista / Windows 7.
 final class Win11GlyphButton: NSView {
     var symbol: String { didSet { if symbol != oldValue { needsDisplay = true } } }
     var pointSize: CGFloat = 12 { didSet { if pointSize != oldValue { needsDisplay = true } } }
@@ -285,15 +286,15 @@ final class Win11GlyphButton: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let W = Theme.Win11.self
+        let L = FlyoutLook.self
         if isEnabled && hovering {
             let r = circular ? min(bounds.width, bounds.height) / 2 : cornerRadius
             let rect = circular
                 ? NSRect(x: bounds.midX - r, y: bounds.midY - r, width: 2 * r, height: 2 * r)
                 : bounds
-            Win11TrayDraw.fill(rect, radius: r, pressed ? W.pressedFill : W.hoverFill)
+            L.drawHover(rect, radius: r, pressed: pressed)
         }
-        let color = !isEnabled ? W.textDisabled : (pressed ? W.textSecondary : W.textPrimary)
+        let color = !isEnabled ? L.textDisabled : (pressed ? L.textSecondary : L.textPrimary)
         if let img = Win11TrayDraw.symbol([symbol], pointSize: pointSize, weight: weight, color: color) {
             Win11TrayDraw.draw(img, centeredIn: bounds)
         }

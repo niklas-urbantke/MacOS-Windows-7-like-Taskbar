@@ -67,7 +67,6 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private weak var draggingButton: TaskbarButton?
     private var dragOffsetX: CGFloat = 0
 
-    private let calendarPopover = NSPopover()
     private let volumePopover = NSPopover()
 
     init(screen: NSScreen, isPrimary: Bool) {
@@ -96,7 +95,10 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         orb.onRightClick = { [weak self] in self?.showOrbMenu() }
         startMenu.onVisibilityChanged = { [weak self] open in
             self?.orb.menuOpen = open
-            if open { self?.closeOtherStartMenus() }
+            if open {
+                Win11Flyouts.closeAll()   // Startmenü und Medien-Flyout nie gleichzeitig
+                self?.closeOtherStartMenus()
+            }
         }
         startMenu11.onVisibilityChanged = { [weak self] open in
             self?.orb.menuOpen = open
@@ -296,7 +298,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         } else { monitorView.removeFromSuperview() }
 
         if showsMedia {
-            nowPlayingView.frame = slot(Theme.nowPlayingWidth)
+            nowPlayingView.frame = slot(nowPlayingView.preferredWidth)
             if nowPlayingView.superview == nil { glass.addSubview(nowPlayingView) }
             nowPlayingView.refresh()
         } else {
@@ -1093,28 +1095,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         clockTimer = timer
     }
 
-    // MARK: - Popovers (calendar & volume)
+    // MARK: - Calendar flyout & volume popover
 
+    /// Kalender-Flyout (wie im Win11-Profil, gezeichnet im Aero-Stil), rechtsbündig über der Uhr.
     private func showCalendar() {
-        if calendarPopover.isShown { calendarPopover.close(); return }
-        let picker = NSDatePicker()
-        picker.datePickerStyle = .clockAndCalendar
-        picker.datePickerElements = [.yearMonthDay, .hourMinuteSecond]
-        picker.dateValue = Date()
-        picker.isBezeled = false
-        picker.drawsBackground = false
-        picker.sizeToFit()
-
-        let vc = NSViewController()
-        let pad: CGFloat = 12
-        let container = NSView(frame: picker.frame.insetBy(dx: -pad, dy: -pad))
-        picker.setFrameOrigin(NSPoint(x: pad, y: pad))
-        container.addSubview(picker)
-        vc.view = container
-
-        calendarPopover.contentViewController = vc
-        calendarPopover.behavior = .transient
-        calendarPopover.show(relativeTo: clock.bounds, of: clock, preferredEdge: .maxY)
+        guard let anchor = Win11TrayDraw.screenRect(of: clock, clock.bounds),
+              let screen = Win11TrayDraw.screen(of: clock) else { return }
+        Win11Flyouts.showCalendar(anchor: anchor, screen: screen)
     }
 
     private func showVolume() {
@@ -1320,7 +1307,6 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         startMenu11.hide()
         Win11Flyouts.closeAll()
         preview.scheduleHide()
-        if calendarPopover.isShown { calendarPopover.close() }
         if volumePopover.isShown { volumePopover.close() }
         Self.registry.removeAll { $0.value == nil || $0.value === self }
         window.orderOut(nil)
