@@ -39,6 +39,11 @@ final class SettingsWindowController: NSObject {
     private let previewModes: [(label: String, value: String)] = [
         ("DockDoor", "dockdoor"), ("Eigene Vorschau", "builtin"), ("Aus", "off")]
 
+    // Kalender-Termine (EventKit): Schalter, Hinweis und Kalenderauswahl.
+    private let eventsBox = NSButton(checkboxWithTitle: "Termine im Kalender der Uhr anzeigen", target: nil, action: nil)
+    private let eventsStatus = NSTextField(wrappingLabelWithString: "")
+    private let calendarList = NSStackView()
+
     // Farbmodus (alle Profile); Ausrichtung und Acryl-Look nur im Windows-11-Profil.
     private let win11AppearancePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let win11Appearances: [(label: String, value: String)] = [("System", "system"), ("Hell", "light"), ("Dunkel", "dark")]
@@ -71,6 +76,7 @@ final class SettingsWindowController: NSObject {
         if window == nil { build() }
         reloadOrbPopup()        // pick up orbs added/dropped since last time
         syncFromController()
+        reloadCalendarSettings()
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -264,6 +270,16 @@ final class SettingsWindowController: NSObject {
         tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox, secondsBox]))
         tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox, finderIconRow]))
 
+        // Kalender: Termine aus allen in macOS eingebundenen Konten (Outlook/Exchange, Google …).
+        eventsBox.target = self
+        eventsBox.action = #selector(eventsToggled)
+        eventsStatus.textColor = .secondaryLabelColor
+        eventsStatus.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        eventsStatus.preferredMaxLayoutWidth = 560
+        calendarList.orientation = .vertical
+        calendarList.alignment = .leading
+        calendarList.spacing = 6
+        tabView.addTabViewItem(makeTab("Kalender", [eventsBox, eventsStatus, calendarList]))
 
         let quit = NSButton(title: "Taskleiste beenden", target: self, action: #selector(quitAction))
         quit.bezelStyle = .rounded
@@ -435,6 +451,67 @@ final class SettingsWindowController: NSObject {
         classicOnlyControls.forEach { $0.isEnabled = !win11 }
         [win11AlignmentPopup, win11AcrylicBox].forEach { $0.isEnabled = win11 }   // Farbmodus gilt für alle Profile
         (frostSliders + tintSliders).forEach { $0.isEnabled = win11 && c.win11Acrylic }
+    }
+
+    // MARK: - Kalender
+
+    @objc private func eventsToggled() {
+        let on = eventsBox.state == .on
+        UserDefaults.standard.set(on, forKey: "calendarEvents")
+        NotificationCenter.default.post(name: CalendarEvents.changedNotification, object: nil)
+        if on && !CalendarEvents.shared.isAuthorized {
+            CalendarEvents.shared.requestAccess { [weak self] _ in self?.reloadCalendarSettings() }
+        }
+        reloadCalendarSettings()
+    }
+
+    /// Status text plus one checkbox per calendar (with its colour), grouped by account.
+    private func reloadCalendarSettings() {
+        let ev = CalendarEvents.shared
+        eventsBox.state = CalendarEvents.enabled ? .on : .off
+        calendarList.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        if ev.isDenied {
+            eventsStatus.stringValue = "Kein Zugriff auf den Kalender. Bitte unter Systemeinstellungen → "
+                + "Datenschutz & Sicherheit → Kalender für Win7Taskbar den vollen Zugriff erlauben."
+            return
+        }
+        if !ev.isAuthorized {
+            eventsStatus.stringValue = "Die Termine kommen aus allen Konten, die in macOS eingebunden sind "
+                + "(Systemeinstellungen → Internetaccounts, z. B. Microsoft Exchange für Outlook, Google). "
+                + "Beim Einschalten fragt macOS einmal nach dem Kalenderzugriff."
+            return
+        }
+        eventsStatus.stringValue = "Angezeigte Kalender:"
+        var account: String?
+        for c in ev.calendars() {
+            if c.account != account {
+                account = c.account
+                let head = NSTextField(labelWithString: c.account.isEmpty ? "Weitere" : c.account)
+                head.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+                calendarList.addArrangedSubview(head)
+            }
+            let box = NSButton(checkboxWithTitle: c.title, target: self, action: #selector(calendarToggled(_:)))
+            box.identifier = NSUserInterfaceItemIdentifier(c.id)
+            box.state = CalendarEvents.hiddenCalendarIDs.contains(c.id) ? .off : .on
+            box.isEnabled = CalendarEvents.enabled
+            let swatch = NSView()
+            swatch.wantsLayer = true
+            swatch.layer?.backgroundColor = c.color.cgColor
+            swatch.layer?.cornerRadius = 5
+            swatch.translatesAutoresizingMaskIntoConstraints = false
+            swatch.widthAnchor.constraint(equalToConstant: 10).isActive = true
+            swatch.heightAnchor.constraint(equalToConstant: 10).isActive = true
+            let row = NSStackView(views: [swatch, box])
+            row.orientation = .horizontal
+            row.spacing = 6
+            calendarList.addArrangedSubview(row)
+        }
+    }
+
+    @objc private func calendarToggled(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        CalendarEvents.setHidden(sender.state == .off, calendarID: id)
     }
 
     @objc private func previewModeChanged() {

@@ -66,6 +66,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>LSUIElement</key>             <true/>
     <key>NSHighResolutionCapable</key> <true/>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Zeigt deine Termine im Kalender der Taskleiste an (nur lesend).</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Steuert Musik-Player, Finder, Energie-Aktionen und die DockDoor-Fenstervorschau.</string>
 </dict>
