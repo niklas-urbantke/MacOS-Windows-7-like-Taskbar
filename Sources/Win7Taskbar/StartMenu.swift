@@ -14,11 +14,10 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private let hoverIcon = NSImageView(frame: .zero)   // action icon shown at the avatar spot on hover
     private let listDoc = FlippedView()        // manual-layout document view (fast for long lists)
     private var listY: CGFloat = 0
-    private static var iconCache: [String: NSImage] = [:]
     private var allApps: [AppEntry] = []
     private var showingAll = false
     private var alleButton: LeftRowButton?
-    private var fileSearchToken = 0
+    private let fileSearch = StartMenuFileSearch()
     private var firstResult: AppEntry?
     var onVisibilityChanged: ((Bool) -> Void)?
     weak var taskbarController: TaskbarController?
@@ -268,7 +267,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         let row = AppRowButton(entry: app,
                                pinned: file ? false : StartPins.isPinned(app.bundleID),
                                onOpen: { [weak self] e in
-                                   if file { NSWorkspace.shared.open(e.url); self?.hide() }
+                                   if file { StartMenuLaunch.open(e, isFile: true); self?.hide() }
                                    else { self?.launch(e) }
                                },
                                onTogglePin: { [weak self] e in
@@ -279,23 +278,13 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
                                    self?.taskbarController?.pinToTaskbar(bundleID: e.bundleID)
                                    self?.hide()
                                })
-        if let cached = StartMenuController.iconCache[app.url.path] { row.iconImage = cached }
+        if let cached = StartMenuIcons.cached(app.url.path) { row.iconImage = cached }
         return row
     }
 
-    /// Load missing icons off the main thread, then apply + cache.
+    /// Load missing icons off the main thread, then apply + cache (shared cache).
     private func loadIcons(_ pending: [(AppRowButton, String)]) {
-        guard !pending.isEmpty else { return }
-        DispatchQueue.global(qos: .userInitiated).async {
-            for (row, path) in pending {
-                let img = NSWorkspace.shared.icon(forFile: path)
-                img.size = NSSize(width: 36, height: 36)
-                DispatchQueue.main.async {
-                    StartMenuController.iconCache[path] = img
-                    row.updateIcon(img)
-                }
-            }
-        }
+        StartMenuIcons.load(pending.map { ($0.0 as StartMenuIconDisplaying, $0.1) })
     }
 
     private func reloadList(filter: String) {
@@ -332,43 +321,11 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     // MARK: - File & folder search (Spotlight)
 
     private func searchFiles(_ query: String) {
-        fileSearchToken += 1
-        let token = fileSearchToken
-        DispatchQueue.global(qos: .userInitiated).async {
-            let results = StartMenuController.runMdfind(query)
-            DispatchQueue.main.async {
-                guard token == self.fileSearchToken,
-                      self.searchField.stringValue.trimmingCharacters(in: .whitespaces) == query
-                else { return }
-                self.appendFileResults(results)
-            }
-        }
-    }
-
-    private static func runMdfind(_ query: String) -> [AppEntry] {
-        let p = Process()
-        p.launchPath = "/usr/bin/mdfind"
-        p.arguments = ["-name", query]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = Pipe()
-        guard (try? p.run()) != nil else { return [] }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        guard let str = String(data: data, encoding: .utf8) else { return [] }
-
-        var seen = Set<String>()
-        var out: [AppEntry] = []
-        for line in str.split(separator: "\n") {
-            let path = String(line)
-            if path.contains(".app/") || path.hasSuffix(".app") { continue }  // apps handled separately
-            guard !seen.contains(path), FileManager.default.fileExists(atPath: path) else { continue }
-            seen.insert(path)
-            out.append(AppEntry(name: (path as NSString).lastPathComponent,
-                                url: URL(fileURLWithPath: path), bundleID: nil))
-            if out.count >= 12 { break }
-        }
-        return out
+        fileSearch.search(query, isCurrent: { [weak self] q in
+            self?.searchField.stringValue.trimmingCharacters(in: .whitespaces) == q
+        }, completion: { [weak self] results in
+            self?.appendFileResults(results)
+        })
     }
 
     private func appendFileResults(_ entries: [AppEntry]) {
@@ -461,28 +418,24 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     // MARK: - Actions
 
     private func launch(_ entry: AppEntry) {
-        NSWorkspace.shared.openApplication(at: entry.url, configuration: .init())
+        StartMenuLaunch.launch(entry)
         hide()
     }
 
     private func openPath(_ path: String) {
-        NSWorkspace.shared.open(URL(fileURLWithPath: path)); hide()
+        StartMenuLaunch.openPath(path); hide()
     }
     private func openHome(_ sub: String) {
         openPath((NSHomeDirectory() as NSString).appendingPathComponent(sub))
     }
     private func openURL(_ s: String) {
-        if let u = URL(string: s) { NSWorkspace.shared.open(u) }; hide()
+        StartMenuLaunch.openURL(s); hide()
     }
     private func openSettings() {
-        openPath("/System/Applications/System Settings.app")
+        openPath(StartMenuLaunch.systemSettingsPath)
     }
     private func openAppByID(_ id: String, fallback path: String) {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
-            NSWorkspace.shared.openApplication(at: url, configuration: .init())
-        } else {
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
-        }
+        StartMenuLaunch.openApp(bundleID: id, fallback: path)
         hide()
     }
 
@@ -579,49 +532,21 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     }
 
     private func runOSA(_ command: String) {
-        let p = Process()
-        p.launchPath = "/usr/bin/osascript"
-        p.arguments = ["-e", command]
-        try? p.run()
+        StartMenuPower.runOSA(command)
         hide()
     }
 
-    @objc private func shutdownAction() { runOSA("tell application \"System Events\" to shut down") }
+    @objc private func shutdownAction() { StartMenuPower.run(.shutdown); hide() }
 
     private func showPowerMenu(from sender: NSView) {
-        let menu = NSMenu()
-        let items: [(String, String)] = [
-            ("Energie sparen", "tell application \"System Events\" to sleep"),
-            ("Neu starten", "tell application \"System Events\" to restart"),
-            ("Abmelden", "tell application \"System Events\" to log out"),
-            ("Herunterfahren", "tell application \"System Events\" to shut down"),
-        ]
-        for (title, cmd) in items {
-            let it = NSMenuItem(title: title, action: #selector(powerItem(_:)), keyEquivalent: "")
-            it.target = self
-            it.representedObject = cmd
-            menu.addItem(it)
+        let menu = StartMenuPower.makeMenu([.sleep, .restart, .logout, .shutdown]) { [weak self] _ in
+            self?.hide()
         }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender)
     }
-
-    @objc private func powerItem(_ sender: NSMenuItem) {
-        if let cmd = sender.representedObject as? String { runOSA(cmd) }
-    }
 }
 
-// MARK: - Borderless window that can still receive keyboard focus (for the search field)
-
-final class KeyableWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-}
-
-// MARK: - Flipped helper view (top-down coordinates) with column background
-
-final class FlippedView: NSView {
-    override var isFlipped: Bool { true }
-}
+// (KeyableWindow and FlippedView live in StartMenuShared.swift.)
 
 /// The light-blue search band at the bottom of the left panel (#f2f5fb) with a soft shadow and a
 /// thin line along its top edge — the transition from the white program list above.
@@ -1004,7 +929,7 @@ private final class LeftRowButton: NSControl {
 
 // MARK: - Left program row (icon + name on white)
 
-private final class AppRowButton: NSControl {
+private final class AppRowButton: NSControl, StartMenuIconDisplaying {
     private let entry: AppEntry
     private let pinned: Bool
     private let onOpen: (AppEntry) -> Void
@@ -1032,48 +957,12 @@ private final class AppRowButton: NSControl {
     override func mouseDown(with event: NSEvent) { onOpen(entry) }
 
     override func rightMouseDown(with event: NSEvent) {
-        let menu = NSMenu()
-        let isApp = entry.bundleID != nil
-
-        if isApp {
-            let pinItem = NSMenuItem(title: pinned ? "Vom Startmenü lösen" : "An Startmenü anheften",
-                                     action: #selector(togglePin), keyEquivalent: "")
-            pinItem.target = self
-            menu.addItem(pinItem)
-
-            if onPinTaskbar != nil {
-                let tb = NSMenuItem(title: "An Taskleiste anheften", action: #selector(pinTaskbarAction), keyEquivalent: "")
-                tb.target = self
-                menu.addItem(tb)
-            }
-        }
-
-        let shortcut = NSMenuItem(title: "Desktopverknüpfung erstellen", action: #selector(shortcutAction), keyEquivalent: "")
-        shortcut.target = self
-        menu.addItem(shortcut)
-
+        let e = entry
+        let menu = StartMenuContextMenu.make(
+            for: e, pinned: pinned,
+            onTogglePin: { [weak self] in self?.onTogglePin(e) },
+            onPinTaskbar: onPinTaskbar.map { cb in { cb(e) } })
         NSMenu.popUpContextMenu(menu, with: event, for: self)
-    }
-    @objc private func togglePin() { onTogglePin(entry) }
-    @objc private func pinTaskbarAction() { onPinTaskbar?(entry) }
-    @objc private func shortcutAction() { AppRowButton.createDesktopShortcut(for: entry) }
-
-    /// Create a Finder alias for the app/file on the Desktop.
-    private static func createDesktopShortcut(for entry: AppEntry) {
-        guard let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
-        else { return }
-        var dest = desktop.appendingPathComponent(entry.name)
-        var n = 2
-        while FileManager.default.fileExists(atPath: dest.path) {
-            dest = desktop.appendingPathComponent("\(entry.name) \(n)"); n += 1
-        }
-        do {
-            let data = try entry.url.bookmarkData(options: .suitableForBookmarkFile,
-                                                  includingResourceValuesForKeys: nil, relativeTo: nil)
-            try URL.writeBookmarkData(data, to: dest)
-        } catch {
-            NSLog("Desktopverknüpfung fehlgeschlagen: \(error)")
-        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
