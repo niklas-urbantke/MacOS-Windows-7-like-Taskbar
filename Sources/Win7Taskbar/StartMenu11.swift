@@ -83,6 +83,15 @@ final class StartMenu11Controller: NSObject, NSTextFieldDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(resignedKey),
             name: NSWindow.didResignKeyNotification, object: window)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appUninstalled),
+            name: AppUninstaller.didUninstallNotification, object: nil)
+    }
+
+    /// An app was uninstalled: rescan and rebuild whatever is showing (pins, A-Z list, results).
+    @objc private func appUninstalled() {
+        allApps = sortedApps(AppScanner.installedApps())
+        if searchField.stringValue.isEmpty { rebuildHomeKeepingScroll() } else { updateSearch() }
     }
 
     // MARK: - Appearance

@@ -322,7 +322,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         for key in pinnedKeys {
             let match = running.first { $0.bundleIdentifier == key }
             if let app = match { usedRunning.insert(app.processIdentifier) }
-            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: key)
+            // After an uninstall LaunchServices still finds the app in the Trash: treat that
+            // (or a vanished file) as not installed, so the pin disappears right away.
+            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: key).flatMap {
+                !$0.path.contains("/.Trash/") && FileManager.default.fileExists(atPath: $0.path) ? $0 : nil
+            }
             let name = match?.localizedName ?? url.flatMap {
                 ($0.lastPathComponent as NSString).deletingPathExtension
             } ?? key
@@ -1146,7 +1150,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(systemColorsChanged),
             name: NSColor.systemColorsDidChangeNotification, object: nil)
+        // An app was uninstalled from the Start menu: its pin is gone, rebuild the button row.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appUninstalled),
+            name: AppUninstaller.didUninstallNotification, object: nil)
     }
+
+    @objc private func appUninstalled() { rebuildItems() }
 
     @objc private func interfaceThemeChanged() {
         // AppleInterfaceStyle is updated slightly after the notification arrives.

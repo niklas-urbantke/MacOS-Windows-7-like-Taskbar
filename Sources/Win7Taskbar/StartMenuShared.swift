@@ -200,7 +200,8 @@ enum StartMenuPower {
 
 enum StartMenuContextMenu {
     /// Rechtsklick-Menü eines Eintrags: An Startmenü anheften/lösen und An Taskleiste anheften
-    /// (nur Apps), Desktopverknüpfung erstellen (immer).
+    /// (nur Apps), Desktopverknüpfung erstellen und Im Finder anzeigen (immer), Deinstallieren
+    /// (nur Drittanbieter-Apps).
     static func make(for entry: AppEntry, pinned: Bool,
                      onTogglePin: @escaping () -> Void,
                      onPinTaskbar: (() -> Void)?) -> NSMenu {
@@ -212,6 +213,13 @@ enum StartMenuContextMenu {
             }
         }
         menu.addItem(ClosureMenuItem("Desktopverknüpfung erstellen") { createDesktopShortcut(for: entry) })
+        menu.addItem(ClosureMenuItem("Im Finder anzeigen") {
+            NSWorkspace.shared.activateFileViewerSelecting([entry.url])
+        })
+        if AppUninstaller.canUninstall(entry.url) {
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem("Deinstallieren") { AppUninstaller.uninstall(entry) })
+        }
         return menu
     }
 

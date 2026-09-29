@@ -43,6 +43,15 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(resignedKey),
             name: NSWindow.didResignKeyNotification, object: window)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appUninstalled),
+            name: AppUninstaller.didUninstallNotification, object: nil)
+    }
+
+    /// An app was uninstalled: rescan so it disappears from the list right away.
+    @objc private func appUninstalled() {
+        allApps = AppScanner.installedApps()
+        reloadList(filter: searchField.stringValue)
     }
 
     /// Farbmodus (Hell/Dunkel), Transparenz (Tönung) und Unschärfe (Frost-Schicht) aus den
