@@ -38,6 +38,18 @@ System-Tray und vieles mehr.
 - **Umsortieren** der Icons per Drag & Drop.
 - **Aktiv-Highlight** als glasig-durchsichtiges Glas (kein harter Farbton).
 
+### Windows-11-Profil
+Unter *Einstellungen → Darstellung → Stil-Profil* neben Vista und Windows 7 wählbar:
+- **Flache Leiste** (48 px) mit Windows-11-Logo in der macOS-Akzentfarbe, Icons **zentriert**
+  oder linksbündig, Laufanzeige als Pill (kurz = läuft, lang in Akzentfarbe = aktiv).
+- **Farbmodus** System / Hell / Dunkel und **Acryl-Look** (alles leicht durchsichtig) als Schalter.
+- **Startmenü im Stil 24H2/25H2**: Suchfeld, „Angeheftet"-Raster, darunter alle Apps von A bis Z
+  mit Buchstaben-Trennern. Ein Klick auf einen Trenner zeigt alle Buchstaben, ein Klick darauf
+  springt direkt hin. Unten nur Einstellungen und Ein/Aus.
+- **Tray**: Medienanzeige (ausklappbar zur großen Ansicht mit Cover und Spulen),
+  Leistungsübersicht (CPU/RAM), WLAN/Lautstärke/Akku, zweizeilige Uhr mit Kalender-Flyout.
+- Die eingebaute Fenstervorschau ist in diesem Profil abgeschaltet.
+
 ### Startmenü
 - **Zweispalten-Layout**: links weiße Programmliste (mit Akzent-/Aero-Rahmen), rechts das
   Glas-Panel mit Orten & Energie-Aktionen, oben das überstehende Profilbild im Glasrahmen.
@@ -74,7 +86,8 @@ Mit einheitlichem Abstand: **Now-Playing** (Spotify/Apple Music mit Fortschritt)
 
 Rechtsklick auf den Orb → **Einstellungen…**, in Tabs gegliedert:
 - **Allgemein**: Dock ausblenden, Fensterbereich reservieren, Autostart (`SMAppService`)
-- **Darstellung**: Start-Symbol (Orb-Auswahl + eigene laden), Startmenü-Stil, Icon-Rahmen über volle Höhe
+- **Darstellung**: Stil-Profil (Vista / Windows 7 / Windows 11), Start-Symbol (Orb-Auswahl + eigene laden),
+  Startmenü-Stil, Icon-Rahmen über volle Höhe, Windows-11-Optionen (Farbmodus, Ausrichtung, Acryl)
 - **Tray**: Now-Playing, WLAN, Hardware-Monitor
 - **Finder**: Klick öffnet neues Fenster, Desktopfenster ignorieren
 
@@ -137,6 +150,8 @@ Sources/Win7Taskbar/
   StartOrbButton.swift / OrbCatalog  Animierter Orb + Orb-Verwaltung
   TaskbarButton.swift / TaskbarItem  Taskbar-Button (Zustände, Gruppierung) + Modell
   StartMenu.swift                    Startmenü (Layout, Suche, Avatar, Stile, Buttons)
+  StartMenu11.swift / StartMenuShared  Windows-11-Startmenü + gemeinsame Menü-Logik
+  Win11Tray.swift / Win11Flyouts     Windows-11-Tray (Medien, Leistung, Uhr) + Flyouts
   AppScanner / RecentsStore / PinStore   Programme finden, zuletzt geöffnet, Pins
   WindowPreview(.Controller).swift   Fensterliste + Thumbnails (ScreenCaptureKit/AX) + Aero-Peek-Panel
   WindowSpaceReserver.swift          Platz-Reservierung (Bedienungshilfen)
