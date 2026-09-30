@@ -1265,16 +1265,32 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         let f = screen.frame
         let sx = f.minX, sy = primary.frame.height - f.maxY, sw = f.width, sh = f.height
 
+        // On displays with a camera notch macOS places full-screen windows below the notch (top =
+        // safe-area inset), so they look like a maximised window. A full-screen Space is then told
+        // apart by the Finder desktop window missing on this display (it is there on every normal
+        // Space, unless the Finder desktop is switched off).
+        let safeTop = screen.safeAreaInsets.top
         let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
+        var belowNotch = false
+        var desktopVisible = false
         for w in list {
             let layer = w[kCGWindowLayer as String] as? Int ?? -1
-            guard layer == 0 else { continue }                       // ordinary app windows only
             guard let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
             let x = b["X"] ?? 0, y = b["Y"] ?? 0
             let ww = b["Width"] ?? 0, hh = b["Height"] ?? 0
-            if x <= sx + 1 && y <= sy + 1 && x + ww >= sx + sw - 1 && y + hh >= sy + sh - 1 { return true }
+            let coversScreenBelowTop = x <= sx + 1 && x + ww >= sx + sw - 1 && y + hh >= sy + sh - 1
+            if layer < 0 {
+                // Finder's desktop window (negative desktop level) spanning this display.
+                if (w[kCGWindowOwnerName as String] as? String) == "Finder", coversScreenBelowTop, y <= sy + 1 {
+                    desktopVisible = true
+                }
+                continue
+            }
+            guard layer == 0, coversScreenBelowTop else { continue }   // ordinary app windows only
+            if y <= sy + 1 { return true }                                  // classic full screen
+            if safeTop > 0 && y <= sy + safeTop + 1 { belowNotch = true }   // candidate on notch display
         }
-        return false
+        return belowNotch && !desktopVisible
     }
 
     @objc private func updateBarVisibility() {
