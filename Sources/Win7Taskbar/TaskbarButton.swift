@@ -21,6 +21,8 @@ final class TaskbarButton: NSControl {
     private var hoverTimer: Timer?
     private var downX: CGFloat = 0
     private var dragStarted = false
+    /// Mouse is down without a drag yet (Win11: icon springs in until mouseUp).
+    private var pressed = false
 
     init(item: TaskbarItem) {
         self.item = item
@@ -62,6 +64,7 @@ final class TaskbarButton: NSControl {
         dragStarted = false
         hoverTimer?.invalidate(); hoverTimer = nil
         downX = glassX(event)
+        pressed = true; needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -69,12 +72,14 @@ final class TaskbarButton: NSControl {
         if !dragStarted {
             if abs(gx - downX) < 5 { return }       // small threshold before a drag begins
             dragStarted = true
+            pressed = false; needsDisplay = true
             buttonDelegate?.taskbarButtonDragBegan(self, atX: downX)
         }
         buttonDelegate?.taskbarButtonDragged(self, toX: gx)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if pressed { pressed = false; needsDisplay = true }
         if dragStarted {
             buttonDelegate?.taskbarButtonDragEnded(self)
         } else {
@@ -131,6 +136,8 @@ final class TaskbarButton: NSControl {
     @objc private func quitAction() { buttonDelegate?.taskbarButtonQuit(item) }
 
     override func draw(_ dirtyRect: NSRect) {
+        if Theme.isWin11 { drawWin11(); return }
+
         // Option: button frames spanning the full bar height (top to bottom).
         // The Windows 7 theme always uses full-height slots.
         let win7 = Theme.taskbarStyle == .win7
@@ -173,6 +180,8 @@ final class TaskbarButton: NSControl {
                 }
                 frontBox = NSRect(x: inset.minX, y: inset.minY, width: sheetW, height: inset.height)
             }
+        } else if !Theme.isDark {
+            drawVistaLight(active: active, running: running, rect: inset, radius: radius)
         } else if active {
             // Glassy translucent highlight for the active app (no colour tint, just lifted glass).
             NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.46),
@@ -233,7 +242,7 @@ final class TaskbarButton: NSControl {
             let spacing: CGFloat = extra <= 1 ? 6 : (extra == 2 ? 5 : 4)
             NSGraphicsContext.current?.saveGraphicsState()
             path.addClip()   // keep the nested frames inside the button (left stays clean)
-            NSColor(calibratedWhite: 1, alpha: 0.32).setStroke()
+            (Theme.isDark ? NSColor(calibratedWhite: 1, alpha: 0.32) : NSColor(calibratedWhite: 0, alpha: 0.22)).setStroke()
             for i in 1...extra {
                 let off = CGFloat(i) * spacing
                 let r = NSRect(x: inset.minX - off, y: inset.minY, width: inset.width, height: inset.height)
@@ -242,6 +251,79 @@ final class TaskbarButton: NSControl {
                 p.stroke()
             }
             NSGraphicsContext.current?.restoreGraphicsState()
+        }
+    }
+
+    // MARK: - Windows 11
+
+    /// Win11 slot: flat rounded field (hover / active / pressed), indicator pill at the bottom,
+    /// centred icon. No stacked look for several windows.
+    private func drawWin11() {
+        typealias W = Theme.Win11
+        let slot = bounds.insetBy(dx: 1, dy: 1)
+        let r = W.buttonRadius
+        let path = NSBezierPath(roundedRect: slot, xRadius: r, yRadius: r)
+
+        // Finder mit nur dem Desktopfenster gilt als "nicht geöffnet" (wie in den anderen Profilen).
+        let finderDesktopOnly = (item.key == "com.apple.finder" && item.windowCount == 0)
+        let running = item.isRunning && !finderDesktopOnly
+        let active = item.isActive && !finderDesktopOnly
+        let isPressed = pressed && !dragStarted
+
+        if isPressed {
+            W.pressedFill.setFill(); path.fill()
+            if active {
+                W.activeStroke.setStroke()
+                let p = NSBezierPath(roundedRect: slot.insetBy(dx: 0.5, dy: 0.5), xRadius: r, yRadius: r)
+                p.lineWidth = 1; p.stroke()
+            }
+        } else if active {
+            W.activeFill.setFill(); path.fill()
+            if hovering { W.hoverFill.setFill(); path.fill() }
+            W.activeStroke.setStroke()
+            let p = NSBezierPath(roundedRect: slot.insetBy(dx: 0.5, dy: 0.5), xRadius: r, yRadius: r)
+            p.lineWidth = 1; p.stroke()
+        } else if hovering {
+            W.hoverFill.setFill(); path.fill()
+        }
+
+        // Indicator pill: long + accent when active, short + grey when merely running.
+        if running {
+            let pillW = active ? W.pillLong : W.pillShort
+            let pillH = W.pillHeight
+            let pill = NSRect(x: (bounds.midX - pillW / 2).rounded(), y: slot.minY + W.s(2),
+                              width: pillW, height: pillH)
+            (active ? W.accent : W.runningPill).setFill()
+            NSBezierPath(roundedRect: pill, xRadius: pillH / 2, yRadius: pillH / 2).fill()
+        }
+
+        // Icon centred; springs in to ~85 % while pressed.
+        let iconS = W.iconSize * (isPressed ? 0.85 : 1)
+        let iconRect = NSRect(x: bounds.midX - iconS / 2, y: bounds.midY - iconS / 2,
+                              width: iconS, height: iconS)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        item.icon.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+
+        // Notification badge, sized for the smaller Win11 icon.
+        if let badge = item.badge {
+            let d = W.s(13)
+            let br = NSRect(x: iconRect.maxX - d + W.s(4), y: iconRect.maxY - d + W.s(4), width: d, height: d)
+            NSColor.systemRed.setFill()
+            NSBezierPath(ovalIn: br).fill()
+            NSColor.white.setStroke()
+            let ring = NSBezierPath(ovalIn: br.insetBy(dx: 0.5, dy: 0.5))
+            ring.lineWidth = 1
+            ring.stroke()
+
+            let text = badge.count <= 2 ? badge : "·"
+            let style = NSMutableParagraphStyle(); style.alignment = .center
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: W.font(8, weight: .bold),
+                .foregroundColor: NSColor.white,
+                .paragraphStyle: style,
+            ]
+            let s = NSAttributedString(string: text, attributes: attrs)
+            s.draw(in: NSRect(x: br.minX, y: br.midY - s.size().height / 2, width: br.width, height: s.size().height))
         }
     }
 
@@ -256,6 +338,33 @@ final class TaskbarButton: NSControl {
             name = hovering ? "notRunningPointerOver" : nil   // pinned, not running: only on hover
         }
         return name.flatMap { ThemeAssets.resizable($0, caps: 8) }
+    }
+
+    /// Vista button glass on the bright (light mode) bar: white on white would vanish, so the
+    /// fields get a dark outer rim and a bright inner line, the glass itself stays milky white.
+    private func drawVistaLight(active: Bool, running: Bool, rect: NSRect, radius: CGFloat) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        let top: CGFloat, bottom: CGFloat, rim: CGFloat
+        if active {
+            (top, bottom, rim) = (hovering ? 0.95 : 0.85, hovering ? 0.60 : 0.50, 0.34)
+        } else if hovering {
+            (top, bottom, rim) = (0.70, 0.30, 0.24)
+        } else if running {
+            (top, bottom, rim) = (0.42, 0.20, 0.16)
+        } else {
+            return
+        }
+        NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: top),
+                            NSColor(calibratedWhite: 1, alpha: bottom)])?.draw(in: path, angle: -90)
+        if active || hovering { addGloss(to: rect, radius: radius) }
+        NSColor(calibratedWhite: 0, alpha: rim).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+        let inner = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1),
+                                 xRadius: max(0, radius - 1), yRadius: max(0, radius - 1))
+        NSColor(calibratedWhite: 1, alpha: active ? 0.85 : 0.6).setStroke()
+        inner.lineWidth = 1
+        inner.stroke()
     }
 
     /// Aero gloss: a bright highlight over the top half of the button.

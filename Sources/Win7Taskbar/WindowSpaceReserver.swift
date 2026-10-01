@@ -7,12 +7,18 @@ import ApplicationServices
 /// Accessibility API to keep every other app's windows above the taskbar: any window whose
 /// bottom edge reaches into the reserved strip gets shrunk (or nudged up). Requires the
 /// "Accessibility" permission. Toggleable; the choice is remembered across launches.
+///
+/// One shared instance serves every screen that shows a taskbar: each window is assigned to the
+/// screen it overlaps most and kept above that screen's bar (screens without a bar are left alone).
 final class WindowSpaceReserver {
+    /// Single instance for all taskbars (one enforcement loop, not one per screen).
+    static let shared = WindowSpaceReserver()
+
     private let key = "reserveSpace"
     private var timer: Timer?
     private(set) var enabled = false
 
-    init() {
+    private init() {
         let firstRun = UserDefaults.standard.object(forKey: key) == nil
         if firstRun {
             // Default ON so the bar reserves space out of the box.
@@ -73,18 +79,32 @@ final class WindowSpaceReserver {
 
     // MARK: - Geometry
 
-    private func geometry() -> (limit: CGFloat, minTop: CGFloat, primaryW: CGFloat, primaryH: CGFloat)? {
-        let primary = NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
-        guard let primary else { return nil }
-        let h = primary.frame.height
-        let w = primary.frame.width
-        let menuBarHeight = max(0, primary.frame.maxY - primary.visibleFrame.maxY)
-        let limit = h - Theme.barHeight          // AX y of the taskbar's top edge
-        return (limit, menuBarHeight, w, h)
+    /// One display in AX coordinates (global, top-left origin at the primary screen, y down).
+    private struct Area {
+        let frame: CGRect        // the whole display
+        let hasBar: Bool         // a taskbar is shown on this display
+        let limit: CGFloat       // AX y of the taskbar's top edge
+        let minTop: CGFloat      // AX y below the menu bar (topmost allowed window origin)
+    }
+
+    private func areas() -> [Area] {
+        guard let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.main
+        else { return [] }
+        let ph = primary.frame.height
+        let barFrames = TaskbarController.barScreens.map { $0.frame }
+        return NSScreen.screens.map { s in
+            let f = s.frame
+            return Area(frame: CGRect(x: f.minX, y: ph - f.maxY, width: f.width, height: f.height),
+                        hasBar: barFrames.contains(f),
+                        limit: ph - (f.minY + Theme.barHeight),
+                        minTop: ph - s.visibleFrame.maxY)
+        }
     }
 
     private func enforce() {
-        guard AXIsProcessTrusted(), let g = geometry() else { return }
+        guard AXIsProcessTrusted() else { return }
+        let all = areas()
+        guard all.contains(where: { $0.hasBar }) else { return }
         let myPID = getpid()
 
         for app in NSWorkspace.shared.runningApplications
@@ -95,20 +115,26 @@ final class WindowSpaceReserver {
                   let windows = value as? [AXUIElement] else { continue }
 
             for win in windows {
-                clamp(win, g)
+                clamp(win, all)
             }
         }
     }
 
-    private func clamp(_ win: AXUIElement, _ g: (limit: CGFloat, minTop: CGFloat, primaryW: CGFloat, primaryH: CGFloat)) {
+    private func clamp(_ win: AXUIElement, _ areas: [Area]) {
         if boolAttr(win, kAXMinimizedAttribute) == true { return }
         guard let pos = pointAttr(win, kAXPositionAttribute),
               let size = sizeAttr(win, kAXSizeAttribute) else { return }
 
-        // Ignore windows that live on another display.
-        if pos.x >= g.primaryW || (pos.x + size.width) <= 0 { return }
+        // The display the window overlaps most; leave it alone if that display has no bar.
+        let rect = CGRect(origin: pos, size: size)
+        func overlap(_ a: Area) -> CGFloat {
+            let i = a.frame.intersection(rect)
+            return i.isNull ? 0 : i.width * i.height
+        }
+        guard let g = areas.max(by: { overlap($0) < overlap($1) }), overlap(g) > 0, g.hasBar else { return }
+
         // Ignore native full-screen windows (their own space, don't touch).
-        if pos.y <= 1 && size.height >= g.primaryH - 2 { return }
+        if pos.y <= g.frame.minY + 1 && size.height >= g.frame.height - 2 { return }
 
         let bottom = pos.y + size.height
         guard bottom > g.limit + 1 else { return }

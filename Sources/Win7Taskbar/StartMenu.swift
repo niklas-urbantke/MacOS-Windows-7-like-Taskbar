@@ -14,11 +14,10 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     private let hoverIcon = NSImageView(frame: .zero)   // action icon shown at the avatar spot on hover
     private let listDoc = FlippedView()        // manual-layout document view (fast for long lists)
     private var listY: CGFloat = 0
-    private static var iconCache: [String: NSImage] = [:]
     private var allApps: [AppEntry] = []
     private var showingAll = false
     private var alleButton: LeftRowButton?
-    private var fileSearchToken = 0
+    private let fileSearch = StartMenuFileSearch()
     private var firstResult: AppEntry?
     var onVisibilityChanged: ((Bool) -> Void)?
     weak var taskbarController: TaskbarController?
@@ -44,12 +43,31 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(resignedKey),
             name: NSWindow.didResignKeyNotification, object: window)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appUninstalled),
+            name: AppUninstaller.didUninstallNotification, object: nil)
     }
 
-    /// Transparenz (Tönung) und Unschärfe (Frost-Schicht) aus den Einstellungen anwenden.
+    /// An app was uninstalled: rescan so it disappears from the list right away.
+    @objc private func appUninstalled() {
+        allApps = AppScanner.installedApps()
+        reloadList(filter: searchField.stringValue)
+    }
+
+    /// Farbmodus (Hell/Dunkel), Transparenz (Tönung) und Unschärfe (Frost-Schicht) aus den
+    /// Einstellungen anwenden und alles neu zeichnen. Wird beim Öffnen und bei jeder Änderung aufgerufen.
     func applyAppearance() {
+        window.appearance = Theme.nsAppearance   // Kontextmenüs und Symbole folgen dem Farbmodus
+        blur.appearance = Theme.nsAppearance
         blur.alphaValue = Theme.menuBlur
         tint.alphaValue = Theme.menuOpacity
+        root.layer?.borderColor = MenuPalette.outerBorder.cgColor
+        if let content = window.contentView { Self.markDirty(content) }
+    }
+
+    private static func markDirty(_ view: NSView) {
+        view.needsDisplay = true
+        view.subviews.forEach(markDirty)
     }
 
     // MARK: - Layout
@@ -64,7 +82,6 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         root.layer?.cornerRadius = 9
         root.layer?.masksToBounds = true
         root.layer?.borderWidth = 1
-        root.layer?.borderColor = NSColor(calibratedWhite: 1, alpha: 0.30).cgColor
 
         // Frosted glass background (like the taskbar): blur + semi-transparent column tint.
         blur.frame = root.bounds
@@ -72,14 +89,11 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         blur.material = .underWindowBackground
         blur.blendingMode = .behindWindow
         blur.state = .active
-        blur.appearance = NSAppearance(named: .darkAqua)
         root.addSubview(blur)
 
         tint.frame = root.bounds
         tint.autoresizingMask = [.width, .height]
         root.addSubview(tint)
-
-        applyAppearance()
 
         buildLeftColumn()
         buildRightColumn()
@@ -101,6 +115,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         outer.addSubview(hoverIcon)
 
         window.contentView = outer
+        applyAppearance()
     }
 
     private func buildLeftColumn() {
@@ -110,6 +125,8 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         scrollView.autohidesScrollers = true
+        // The program list is always white, so its scroller keeps the light look in both modes.
+        scrollView.verticalScroller?.appearance = NSAppearance(named: .aqua)
 
         listDoc.frame = NSRect(x: 0, y: 0, width: leftW - 24, height: 10)
         scrollView.documentView = listDoc
@@ -145,6 +162,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         searchField.font = NSFont.systemFont(ofSize: 13)
         searchField.textColor = .black
         searchField.focusRingType = .none
+        searchField.appearance = NSAppearance(named: .aqua)   // sits on the white field in both modes
         root.addSubview(searchField)
 
         let mag = NSImageView(frame: NSRect(x: fieldRect.maxX - 24, y: fieldRect.midY - 8.5, width: 17, height: 17))
@@ -228,16 +246,9 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     /// A subtle engraved separator line (dark + light) in the right column.
     @discardableResult
     private func addSeparator(at y: CGFloat, x: CGFloat, width: CGFloat) -> [NSView] {
-        let dark = NSView(frame: NSRect(x: x, y: y, width: width, height: 1))
-        dark.wantsLayer = true
-        dark.layer?.backgroundColor = NSColor(calibratedWhite: 0, alpha: 0.18).cgColor
-        root.addSubview(dark)
-
-        let light = NSView(frame: NSRect(x: x, y: y + 1, width: width, height: 1))
-        light.wantsLayer = true
-        light.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.40).cgColor
-        root.addSubview(light)
-        return [dark, light]
+        let line = SeparatorView(frame: NSRect(x: x, y: y, width: width, height: 2))
+        root.addSubview(line)
+        return [line]
     }
 
     // MARK: - Data
@@ -268,7 +279,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         let row = AppRowButton(entry: app,
                                pinned: file ? false : StartPins.isPinned(app.bundleID),
                                onOpen: { [weak self] e in
-                                   if file { NSWorkspace.shared.open(e.url); self?.hide() }
+                                   if file { StartMenuLaunch.open(e, isFile: true); self?.hide() }
                                    else { self?.launch(e) }
                                },
                                onTogglePin: { [weak self] e in
@@ -279,23 +290,13 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
                                    self?.taskbarController?.pinToTaskbar(bundleID: e.bundleID)
                                    self?.hide()
                                })
-        if let cached = StartMenuController.iconCache[app.url.path] { row.iconImage = cached }
+        if let cached = StartMenuIcons.cached(app.url.path) { row.iconImage = cached }
         return row
     }
 
-    /// Load missing icons off the main thread, then apply + cache.
+    /// Load missing icons off the main thread, then apply + cache (shared cache).
     private func loadIcons(_ pending: [(AppRowButton, String)]) {
-        guard !pending.isEmpty else { return }
-        DispatchQueue.global(qos: .userInitiated).async {
-            for (row, path) in pending {
-                let img = NSWorkspace.shared.icon(forFile: path)
-                img.size = NSSize(width: 36, height: 36)
-                DispatchQueue.main.async {
-                    StartMenuController.iconCache[path] = img
-                    row.updateIcon(img)
-                }
-            }
-        }
+        StartMenuIcons.load(pending.map { ($0.0 as StartMenuIconDisplaying, $0.1) })
     }
 
     private func reloadList(filter: String) {
@@ -332,43 +333,11 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     // MARK: - File & folder search (Spotlight)
 
     private func searchFiles(_ query: String) {
-        fileSearchToken += 1
-        let token = fileSearchToken
-        DispatchQueue.global(qos: .userInitiated).async {
-            let results = StartMenuController.runMdfind(query)
-            DispatchQueue.main.async {
-                guard token == self.fileSearchToken,
-                      self.searchField.stringValue.trimmingCharacters(in: .whitespaces) == query
-                else { return }
-                self.appendFileResults(results)
-            }
-        }
-    }
-
-    private static func runMdfind(_ query: String) -> [AppEntry] {
-        let p = Process()
-        p.launchPath = "/usr/bin/mdfind"
-        p.arguments = ["-name", query]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = Pipe()
-        guard (try? p.run()) != nil else { return [] }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        guard let str = String(data: data, encoding: .utf8) else { return [] }
-
-        var seen = Set<String>()
-        var out: [AppEntry] = []
-        for line in str.split(separator: "\n") {
-            let path = String(line)
-            if path.contains(".app/") || path.hasSuffix(".app") { continue }  // apps handled separately
-            guard !seen.contains(path), FileManager.default.fileExists(atPath: path) else { continue }
-            seen.insert(path)
-            out.append(AppEntry(name: (path as NSString).lastPathComponent,
-                                url: URL(fileURLWithPath: path), bundleID: nil))
-            if out.count >= 12 { break }
-        }
-        return out
+        fileSearch.search(query, isCurrent: { [weak self] q in
+            self?.searchField.stringValue.trimmingCharacters(in: .whitespaces) == q
+        }, completion: { [weak self] results in
+            self?.appendFileResults(results)
+        })
     }
 
     private func appendFileResults(_ entries: [AppEntry]) {
@@ -398,8 +367,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         hideActionIcon()
         alleButton?.setTitle("Alle Programme", back: false)
         searchField.stringValue = ""
-        root.subviews.forEach { $0.needsDisplay = true }   // reflect a possible style change
-        avatar.needsDisplay = true
+        applyAppearance()   // reflect a possible style or colour-mode change
         reloadList(filter: "")
 
         let x = max(screen.frame.minX, orbScreenRect.minX)
@@ -461,28 +429,24 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
     // MARK: - Actions
 
     private func launch(_ entry: AppEntry) {
-        NSWorkspace.shared.openApplication(at: entry.url, configuration: .init())
+        StartMenuLaunch.launch(entry)
         hide()
     }
 
     private func openPath(_ path: String) {
-        NSWorkspace.shared.open(URL(fileURLWithPath: path)); hide()
+        StartMenuLaunch.openPath(path); hide()
     }
     private func openHome(_ sub: String) {
         openPath((NSHomeDirectory() as NSString).appendingPathComponent(sub))
     }
     private func openURL(_ s: String) {
-        if let u = URL(string: s) { NSWorkspace.shared.open(u) }; hide()
+        StartMenuLaunch.openURL(s); hide()
     }
     private func openSettings() {
-        openPath("/System/Applications/System Settings.app")
+        openPath(StartMenuLaunch.systemSettingsPath)
     }
     private func openAppByID(_ id: String, fallback path: String) {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
-            NSWorkspace.shared.openApplication(at: url, configuration: .init())
-        } else {
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
-        }
+        StartMenuLaunch.openApp(bundleID: id, fallback: path)
         hide()
     }
 
@@ -572,69 +536,93 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         case .helpApple:       openURL("https://support.apple.com/de-de")
         case .sleep:           runOSA("tell application \"System Events\" to sleep")
         case .lock:            runOSA("tell application \"System Events\" to keystroke \"q\" using {command down, control down}")
-        case .logout:          runOSA("tell application \"System Events\" to log out")
-        case .restart:         runOSA("tell application \"System Events\" to restart")
-        case .shutdown:        runOSA("tell application \"System Events\" to shut down")
+        case .logout:          runOSA(StartMenuPower.Action.logout.script)
+        case .restart:         runOSA(StartMenuPower.Action.restart.script)
+        case .shutdown:        runOSA(StartMenuPower.Action.shutdown.script)
         }
     }
 
     private func runOSA(_ command: String) {
-        let p = Process()
-        p.launchPath = "/usr/bin/osascript"
-        p.arguments = ["-e", command]
-        try? p.run()
+        StartMenuPower.runOSA(command)
         hide()
     }
 
-    @objc private func shutdownAction() { runOSA("tell application \"System Events\" to shut down") }
+    @objc private func shutdownAction() { StartMenuPower.run(.shutdown); hide() }
 
     private func showPowerMenu(from sender: NSView) {
-        let menu = NSMenu()
-        let items: [(String, String)] = [
-            ("Energie sparen", "tell application \"System Events\" to sleep"),
-            ("Neu starten", "tell application \"System Events\" to restart"),
-            ("Abmelden", "tell application \"System Events\" to log out"),
-            ("Herunterfahren", "tell application \"System Events\" to shut down"),
-        ]
-        for (title, cmd) in items {
-            let it = NSMenuItem(title: title, action: #selector(powerItem(_:)), keyEquivalent: "")
-            it.target = self
-            it.representedObject = cmd
-            menu.addItem(it)
+        let menu = StartMenuPower.makeMenu([.sleep, .restart, .logout, .shutdown]) { [weak self] _ in
+            self?.hide()
         }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender)
     }
+}
 
-    @objc private func powerItem(_ sender: NSMenuItem) {
-        if let cmd = sender.representedObject as? String { runOSA(cmd) }
+// (KeyableWindow and FlippedView live in StartMenuShared.swift.)
+
+// MARK: - Palette (menu style × colour mode)
+
+/// Colours of the classic start menu that depend on the menu style (`accent` / `aero`) and the
+/// colour mode. Always read at draw time, both can change while the menu exists. Dark mode keeps
+/// the familiar dark look; light mode mirrors Win7 with a light glass colour: milky frosted
+/// glass with dark text.
+private enum MenuPalette {
+    static var aero: Bool { UserDefaults.standard.string(forKey: "menuStyle") == "aero" }
+    static var light: Bool { !Theme.isDark }
+    static func mono(_ w: CGFloat, _ a: CGFloat) -> NSColor { NSColor(calibratedWhite: w, alpha: a) }
+
+    /// Outer border of the whole menu.
+    static var outerBorder: NSColor {
+        guard light else { return mono(1, 0.30) }
+        return aero ? mono(0, 0.30) : Theme.accent(brightness: 0.70, alpha: 0.60)
     }
+    /// Text on the glass (right column, power button).
+    static var glassText: NSColor { light ? Theme.Aero.text : .white }
+    /// Light mode: soft white halo behind the dark text (like the Win7 glass glow).
+    static var glassTextGlow: NSShadow? {
+        guard light else { return nil }
+        let s = NSShadow()
+        s.shadowColor = mono(1, 0.85)
+        s.shadowOffset = .zero
+        s.shadowBlurRadius = 3
+        return s
+    }
+    /// Border of the white program panel (only needed on light glass, where white meets white).
+    static var panelBorder: NSColor? {
+        guard light else { return nil }
+        return aero ? mono(0, 0.16) : Theme.accent(brightness: 0.65, alpha: 0.35)
+    }
+    /// Engraved separator in the right column: dark line on top, bright line below.
+    static var separatorDark: NSColor { light ? mono(0, 0.13) : mono(0, 0.18) }
+    static var separatorLight: NSColor { light ? mono(1, 0.80) : mono(1, 0.40) }
 }
 
-// MARK: - Borderless window that can still receive keyboard focus (for the search field)
-
-final class KeyableWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-}
-
-// MARK: - Flipped helper view (top-down coordinates) with column background
-
-final class FlippedView: NSView {
+/// Engraved separator line of the right column (two 1 px lines, colours read at draw time).
+private final class SeparatorView: NSView {
     override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        MenuPalette.separatorDark.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+        MenuPalette.separatorLight.setFill()
+        NSRect(x: 0, y: 1, width: bounds.width, height: 1).fill()
+    }
 }
 
 /// The light-blue search band at the bottom of the left panel (#f2f5fb) with a soft shadow and a
 /// thin line along its top edge — the transition from the white program list above.
+/// In the light Aero style the band turns a neutral frosted silver instead of light blue.
 private final class SearchPanelBandView: NSView {
     override func draw(_ dirtyRect: NSRect) {
-        NSColor(srgbRed: 242/255, green: 245/255, blue: 251/255, alpha: 1).setFill()
+        let frost = MenuPalette.light && MenuPalette.aero
+        (frost ? NSColor(srgbRed: 243/255, green: 244/255, blue: 246/255, alpha: 1)
+               : NSColor(srgbRed: 242/255, green: 245/255, blue: 251/255, alpha: 1)).setFill()
         bounds.fill()
         // Soft shadow just under the top edge (this view is not flipped → top = maxY).
         let shadow = NSRect(x: bounds.minX, y: bounds.maxY - 6, width: bounds.width, height: 6)
         NSGradient(colors: [NSColor(calibratedWhite: 0, alpha: 0.10),
                             NSColor(calibratedWhite: 0, alpha: 0.0)])?.draw(in: shadow, angle: -90)
         // Thin separator line at the very top.
-        NSColor(srgbRed: 0xcd/255, green: 0xdb/255, blue: 0xea/255, alpha: 1).setFill()
+        (frost ? NSColor(srgbRed: 0xd6/255, green: 0xd9/255, blue: 0xde/255, alpha: 1)
+               : NSColor(srgbRed: 0xcd/255, green: 0xdb/255, blue: 0xea/255, alpha: 1)).setFill()
         NSRect(x: bounds.minX, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
     }
 }
@@ -668,7 +656,18 @@ private final class ColumnTintView: NSView {
     private let border: CGFloat = 10
 
     override func draw(_ dirtyRect: NSRect) {
-        if UserDefaults.standard.string(forKey: "menuStyle") == "aero" {
+        let light = MenuPalette.light
+        if MenuPalette.aero && light {
+            // Light frosted Aero glass (Win7 with a light glass colour): milky white, a little
+            // denser towards the bottom, with a bright gloss over the top.
+            NSGradient(colors: [
+                MenuPalette.mono(1.00, 0.62),
+                MenuPalette.mono(0.94, 0.64),
+                MenuPalette.mono(0.86, 0.72),
+            ], atLocations: [0.0, 0.5, 1.0], colorSpace: .deviceRGB)?.draw(in: bounds, angle: -90)
+            NSGradient(colors: [MenuPalette.mono(1, 0.45), MenuPalette.mono(1, 0.0)])?
+                .draw(in: NSRect(x: 0, y: bounds.midY, width: bounds.width, height: bounds.height / 2), angle: -90)
+        } else if MenuPalette.aero {
             // Dark Aero glass, like the taskbar.
             let glass = NSGradient(colors: [
                 NSColor(calibratedWhite: 0.34, alpha: 0.55),
@@ -680,6 +679,15 @@ private final class ColumnTintView: NSView {
             NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.22),
                                 NSColor(calibratedWhite: 1, alpha: 0.0)])?
                 .draw(in: NSRect(x: 0, y: bounds.midY, width: bounds.width, height: bounds.height / 2), angle: -90)
+        } else if light {
+            // Light accent glass: the accent colour, but pale and airy so dark text reads well.
+            let a: CGFloat = 0.55
+            NSGradient(colors: [
+                Theme.accent(brightness: 1.35, saturation: 0.40).withAlphaComponent(a),
+                Theme.accent(brightness: 1.45, saturation: 0.28).withAlphaComponent(a),
+                Theme.accent(brightness: 1.25, saturation: 0.48).withAlphaComponent(a),
+                Theme.accent(brightness: 1.05, saturation: 0.66).withAlphaComponent(a),
+            ], atLocations: [0.0, 0.18, 0.55, 1.0], colorSpace: .sRGB)?.draw(in: bounds, angle: -90)
         } else {
             // Rich accent gradient: medium-blue at top with a soft highlight, deepening downward.
             let a: CGFloat = 0.6
@@ -696,8 +704,19 @@ private final class ColumnTintView: NSView {
         let panel = NSRect(x: border, y: border,
                            width: Theme.startLeftWidth - 2 * border,
                            height: bounds.height - 2 * border)
+        let panelPath = NSBezierPath(roundedRect: panel, xRadius: 6, yRadius: 6)
         NSColor.white.setFill()
-        NSBezierPath(roundedRect: panel, xRadius: 6, yRadius: 6).fill()
+        panelPath.fill()
+
+        if light {
+            // Light glass: a hairline around the white panel and the bright inner rim of the glass.
+            if let c = MenuPalette.panelBorder {
+                let edge = NSBezierPath(roundedRect: panel.insetBy(dx: -0.5, dy: -0.5), xRadius: 6.5, yRadius: 6.5)
+                c.setStroke(); edge.lineWidth = 1; edge.stroke()
+            }
+            let rim = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 8, yRadius: 8)
+            MenuPalette.mono(1, 0.75).setStroke(); rim.lineWidth = 1; rim.stroke()
+        }
     }
 }
 
@@ -722,11 +741,21 @@ private final class AvatarView: NSView {
         let outerPath = NSBezierPath(roundedRect: outer, xRadius: 9, yRadius: 9)
 
         // Glassy frame body — accent-tinted, or silver in Aero mode (matching the menu style).
+        // Light mode: a brighter, frostier frame.
         let frameColors: [NSColor]
-        if UserDefaults.standard.string(forKey: "menuStyle") == "aero" {
+        let light = MenuPalette.light
+        if MenuPalette.aero && light {
+            frameColors = [NSColor(calibratedWhite: 1.00, alpha: 1),
+                           NSColor(calibratedWhite: 0.92, alpha: 1),
+                           NSColor(calibratedWhite: 0.76, alpha: 1)]
+        } else if MenuPalette.aero {
             frameColors = [NSColor(calibratedWhite: 0.96, alpha: 1),
                            NSColor(calibratedWhite: 0.78, alpha: 1),
                            NSColor(calibratedWhite: 0.55, alpha: 1)]
+        } else if light {
+            frameColors = [Theme.accent(brightness: 1.6, saturation: 0.14),
+                           Theme.accent(brightness: 1.35, saturation: 0.36),
+                           Theme.accent(brightness: 1.00, saturation: 0.72)]
         } else {
             frameColors = [Theme.accent(brightness: 1.5, saturation: 0.22),
                            Theme.accent(brightness: 1.15, saturation: 0.55),
@@ -762,7 +791,7 @@ private final class AvatarView: NSView {
 
         // Bevel: dark recess line around the photo, dark hairline + white highlight on the frame.
         NSColor(calibratedWhite: 0, alpha: 0.35).setStroke(); innerPath.lineWidth = 1.5; innerPath.stroke()
-        NSColor(calibratedWhite: 0, alpha: 0.40).setStroke(); outerPath.lineWidth = 1; outerPath.stroke()
+        NSColor(calibratedWhite: 0, alpha: light ? 0.30 : 0.40).setStroke(); outerPath.lineWidth = 1; outerPath.stroke()
         let hi = NSBezierPath(roundedRect: outer.insetBy(dx: 1.5, dy: 1.5), xRadius: 8, yRadius: 8)
         NSColor(calibratedWhite: 1, alpha: 0.5).setStroke(); hi.lineWidth = 1; hi.stroke()
     }
@@ -837,11 +866,29 @@ private final class Win7Button: NSControl {
         let r = bounds.insetBy(dx: 0.5, dy: 0.5)
         let path = framePath(r, radius: 3)
 
-        let aero = UserDefaults.standard.string(forKey: "menuStyle") == "aero"
-        let textColor: NSColor = .white
+        let aero = MenuPalette.aero
+        let light = MenuPalette.light
+        let textColor = MenuPalette.glassText
         var border = NSColor(calibratedWhite: 0, alpha: 0.6)
 
-        if aero {
+        if aero && light {
+            // Light silver glass (same build as the dark variant: a faint base + bright glass on top).
+            let baseStops: [(String, CGFloat)]
+            let highStops: [(String, CGFloat)]
+            if pressed {
+                baseStops = [("000000", 0.14), ("000000", 0.18), ("000000", 0.24), ("000000", 0.16)]
+                highStops = [("d6d6d6", 0.90), ("cdcdcd", 0.85), ("bfbfbf", 0.85), ("d0d0d0", 0.90)]
+            } else if hovering {
+                baseStops = [("000000", 0.04), ("000000", 0.06), ("000000", 0.10), ("000000", 0.06)]
+                highStops = [("ffffff", 0.97), ("fbfcfe", 0.90), ("e6edf6", 0.88), ("f1f5fb", 0.92)]
+            } else {
+                baseStops = [("000000", 0.05), ("000000", 0.08), ("000000", 0.14), ("000000", 0.08)]
+                highStops = [("ffffff", 0.88), ("f5f5f5", 0.72), ("e3e3e3", 0.64), ("eeeeee", 0.74)]
+            }
+            Win7Button.glassGradient(baseStops)?.draw(in: path, angle: -90)
+            Win7Button.glassGradient(highStops)?.draw(in: path, angle: -90)
+            border = NSColor(calibratedWhite: 0, alpha: 0.42)
+        } else if aero {
             // Exact Windows-7 button glass: a dark base gradient + a light "high" glass gradient on
             // top (stops taken 1:1 from the reference startmenu-buttons.svg), per state. The doubled
             // 0.5 stop makes the crisp glass crease across the middle.
@@ -860,9 +907,25 @@ private final class Win7Button: NSControl {
             Win7Button.glassGradient(blackStops)?.draw(in: path, angle: -90)
             Win7Button.glassGradient(highStops)?.draw(in: path, angle: -90)
         } else {
-            // Accent-coloured glass.
+            // Accent-coloured glass (pale in light mode, so the dark label stays legible).
             let colors: [NSColor]
-            if pressed {
+            var fillAlpha: CGFloat = 0.5
+            if light {
+                fillAlpha = 0.78
+                if pressed {
+                    colors = [Theme.accent(brightness: 1.00, saturation: 0.70), Theme.accent(brightness: 1.10, saturation: 0.60),
+                              Theme.accent(brightness: 1.15, saturation: 0.55), Theme.accent(brightness: 1.20, saturation: 0.50)]
+                    border = Theme.accent(brightness: 0.55)
+                } else if hovering {
+                    colors = [Theme.accent(brightness: 1.60, saturation: 0.16), Theme.accent(brightness: 1.45, saturation: 0.26),
+                              Theme.accent(brightness: 1.25, saturation: 0.44), Theme.accent(brightness: 1.40, saturation: 0.34)]
+                    border = Theme.accent(brightness: 0.75)
+                } else {
+                    colors = [Theme.accent(brightness: 1.50, saturation: 0.22), Theme.accent(brightness: 1.35, saturation: 0.34),
+                              Theme.accent(brightness: 1.15, saturation: 0.54), Theme.accent(brightness: 1.30, saturation: 0.44)]
+                    border = Theme.accent(brightness: 0.65)
+                }
+            } else if pressed {
                 colors = [Theme.accent(brightness: 0.62, saturation: 1.0), Theme.accent(brightness: 0.72, saturation: 0.95),
                           Theme.accent(brightness: 0.8, saturation: 0.9), Theme.accent(brightness: 0.88, saturation: 0.85)]
                 border = Theme.accent(brightness: 0.5)
@@ -875,7 +938,7 @@ private final class Win7Button: NSControl {
                           Theme.accent(brightness: 0.8, saturation: 0.95), Theme.accent(brightness: 0.96, saturation: 0.85)]
                 border = Theme.accent(brightness: 0.6)
             }
-            NSGradient(colors: colors.map { $0.withAlphaComponent(0.5) },
+            NSGradient(colors: colors.map { $0.withAlphaComponent(fillAlpha) },
                        atLocations: [0.0, 0.49, 0.5, 1.0], colorSpace: .sRGB)?.draw(in: path, angle: -90)
             NSGraphicsContext.current?.saveGraphicsState()
             path.addClip()
@@ -886,10 +949,10 @@ private final class Win7Button: NSControl {
         }
 
         // Thin black outer frame (Aero style), else the accent border. (No white perimeter ring.)
-        (aero ? NSColor(calibratedWhite: 0, alpha: 0.6) : border.withAlphaComponent(0.7)).setStroke()
+        (aero ? border : border.withAlphaComponent(0.7)).setStroke()
         path.lineWidth = 1; path.stroke()
 
-        // Label — white (accent) with a soft shadow, or dark (silver/aero).
+        // Label: white with a soft dark shadow on dark glass, dark with a white halo on light glass.
         let style = NSMutableParagraphStyle(); style.alignment = .center
         var attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 14, weight: .medium),
@@ -900,14 +963,14 @@ private final class Win7Button: NSControl {
         shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.5)
         shadow.shadowOffset = NSSize(width: 0, height: -1)
         shadow.shadowBlurRadius = 1.5
-        attrs[.shadow] = shadow
+        attrs[.shadow] = light ? MenuPalette.glassTextGlow : shadow
         let s = NSAttributedString(string: title, attributes: attrs)
         s.draw(in: NSRect(x: 0, y: (bounds.height - s.size().height) / 2 + (pressed ? -0.5 : 0),
                           width: bounds.width, height: s.size().height))
     }
 }
 
-// MARK: - Right-column link row (white text on blue)
+// MARK: - Right-column link row (white text on dark glass, dark text on light glass)
 
 private final class RightRowButton: NSControl {
     private let title: String
@@ -928,12 +991,13 @@ private final class RightRowButton: NSControl {
     override func mouseDown(with event: NSEvent) { onClick() }
 
     override func draw(_ dirtyRect: NSRect) {
+        let light = MenuPalette.light
         if hovering {
-            // Glassy Aero hover frame.
+            // Glassy Aero hover frame (denser and with a darker rim on light glass).
             let r = bounds.insetBy(dx: 1, dy: 2)
             let path = NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4)
-            NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: 0.30),
-                                NSColor(calibratedWhite: 1, alpha: 0.10)])?.draw(in: path, angle: -90)
+            NSGradient(colors: [NSColor(calibratedWhite: 1, alpha: light ? 0.72 : 0.30),
+                                NSColor(calibratedWhite: 1, alpha: light ? 0.38 : 0.10)])?.draw(in: path, angle: -90)
             // Top gloss highlight.
             NSGraphicsContext.current?.saveGraphicsState()
             path.addClip()
@@ -942,12 +1006,21 @@ private final class RightRowButton: NSControl {
                                 NSColor(calibratedWhite: 1, alpha: 0.0)])?.draw(in: gloss, angle: -90)
             NSGraphicsContext.current?.restoreGraphicsState()
             // Subtle border.
-            NSColor(calibratedWhite: 1, alpha: 0.55).setStroke()
+            let rim: NSColor
+            if !light { rim = NSColor(calibratedWhite: 1, alpha: 0.55) }
+            else if MenuPalette.aero { rim = NSColor(calibratedWhite: 0, alpha: 0.24) }
+            else { rim = Theme.accent(brightness: 0.70, alpha: 0.55) }
+            rim.setStroke()
             path.lineWidth = 1
             path.stroke()
+            if light {
+                let inner = NSBezierPath(roundedRect: r.insetBy(dx: 1, dy: 1), xRadius: 3, yRadius: 3)
+                NSColor(calibratedWhite: 1, alpha: 0.75).setStroke(); inner.lineWidth = 1; inner.stroke()
+            }
         }
         let font = bold ? NSFont.boldSystemFont(ofSize: 16.5) : NSFont.systemFont(ofSize: 15)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+        var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: MenuPalette.glassText]
+        if let glow = MenuPalette.glassTextGlow { attrs[.shadow] = glow }
         let s = NSAttributedString(string: title, attributes: attrs)
         s.draw(at: NSPoint(x: 8, y: (bounds.height - s.size().height) / 2))
     }
@@ -1004,7 +1077,7 @@ private final class LeftRowButton: NSControl {
 
 // MARK: - Left program row (icon + name on white)
 
-private final class AppRowButton: NSControl {
+private final class AppRowButton: NSControl, StartMenuIconDisplaying {
     private let entry: AppEntry
     private let pinned: Bool
     private let onOpen: (AppEntry) -> Void
@@ -1032,48 +1105,12 @@ private final class AppRowButton: NSControl {
     override func mouseDown(with event: NSEvent) { onOpen(entry) }
 
     override func rightMouseDown(with event: NSEvent) {
-        let menu = NSMenu()
-        let isApp = entry.bundleID != nil
-
-        if isApp {
-            let pinItem = NSMenuItem(title: pinned ? "Vom Startmenü lösen" : "An Startmenü anheften",
-                                     action: #selector(togglePin), keyEquivalent: "")
-            pinItem.target = self
-            menu.addItem(pinItem)
-
-            if onPinTaskbar != nil {
-                let tb = NSMenuItem(title: "An Taskleiste anheften", action: #selector(pinTaskbarAction), keyEquivalent: "")
-                tb.target = self
-                menu.addItem(tb)
-            }
-        }
-
-        let shortcut = NSMenuItem(title: "Desktopverknüpfung erstellen", action: #selector(shortcutAction), keyEquivalent: "")
-        shortcut.target = self
-        menu.addItem(shortcut)
-
+        let e = entry
+        let menu = StartMenuContextMenu.make(
+            for: e, pinned: pinned,
+            onTogglePin: { [weak self] in self?.onTogglePin(e) },
+            onPinTaskbar: onPinTaskbar.map { cb in { cb(e) } })
         NSMenu.popUpContextMenu(menu, with: event, for: self)
-    }
-    @objc private func togglePin() { onTogglePin(entry) }
-    @objc private func pinTaskbarAction() { onPinTaskbar?(entry) }
-    @objc private func shortcutAction() { AppRowButton.createDesktopShortcut(for: entry) }
-
-    /// Create a Finder alias for the app/file on the Desktop.
-    private static func createDesktopShortcut(for entry: AppEntry) {
-        guard let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
-        else { return }
-        var dest = desktop.appendingPathComponent(entry.name)
-        var n = 2
-        while FileManager.default.fileExists(atPath: dest.path) {
-            dest = desktop.appendingPathComponent("\(entry.name) \(n)"); n += 1
-        }
-        do {
-            let data = try entry.url.bookmarkData(options: .suitableForBookmarkFile,
-                                                  includingResourceValuesForKeys: nil, relativeTo: nil)
-            try URL.writeBookmarkData(data, to: dest)
-        } catch {
-            NSLog("Desktopverknüpfung fehlgeschlagen: \(error)")
-        }
     }
 
     override func draw(_ dirtyRect: NSRect) {

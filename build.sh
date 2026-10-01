@@ -31,6 +31,26 @@ if [ -d "ThemeResources" ]; then
     echo "▶ Win7-Theme-Grafiken eingebunden: $(ls ThemeResources/*.png 2>/dev/null | wc -l | tr -d ' ') PNGs."
 fi
 
+# MediaRemote-Helfer: systemweite Wiedergabe-Info (Tidal & Co.). Die dylib läuft in
+# /usr/bin/perl, weil macOS die Info normalen Apps vorenthält (siehe MediaRemoteHelper/).
+if [ -d "MediaRemoteHelper" ]; then
+    MR_OUT=".build/mediaremote"
+    mkdir -p "$MR_OUT" "$APP_BUNDLE/Contents/Resources/mediaremote"
+    if clang -dynamiclib -fobjc-arc -O2 -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \
+            -framework Foundation -o "$MR_OUT/libmediaremote-helper.dylib" \
+            MediaRemoteHelper/MediaRemoteHelper.m; then
+        cp "$MR_OUT/libmediaremote-helper.dylib" MediaRemoteHelper/mediaremote-helper.pl \
+            "$APP_BUNDLE/Contents/Resources/mediaremote/"
+        # Beide Architekturen einzeln signieren (ld signiert nur arm64), sonst stolpert
+        # das Signieren des Bundles über ungesignierten Code in den Resources.
+        codesign --force --sign - "$APP_BUNDLE/Contents/Resources/mediaremote/libmediaremote-helper.dylib" \
+            >/dev/null 2>&1 || true
+        echo "▶ MediaRemote-Helfer eingebunden (arm64 + x86_64)."
+    else
+        echo "⚠ MediaRemote-Helfer nicht gebaut: Medienanzeige nur für Spotify/Music."
+    fi
+fi
+
 cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,6 +66,10 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>LSUIElement</key>             <true/>
     <key>NSHighResolutionCapable</key> <true/>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Zeigt deine Termine im Kalender der Taskleiste an (nur lesend).</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Steuert Musik-Player, Finder, Energie-Aktionen und die DockDoor-Fenstervorschau.</string>
 </dict>
 </plist>
 PLIST
@@ -55,7 +79,7 @@ PLIST
 IDENTITY="Win7Taskbar Self-Signed"
 # Hash der GÜLTIGEN Identität (ohne "Invalid"-Hinweis, falls mehrere existieren).
 HASH=$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep "$IDENTITY" | grep -v -i "invalid" | head -1 | awk '{print $2}')
+    | grep "$IDENTITY" | grep -v -i "invalid" | head -1 | awk '{print $2}' || true)
 if [ -n "$HASH" ]; then
     codesign --force --deep --sign "$HASH" "$APP_BUNDLE" >/dev/null 2>&1 \
         && echo "▶ Stabil signiert ($IDENTITY) – Berechtigungen bleiben erhalten." \

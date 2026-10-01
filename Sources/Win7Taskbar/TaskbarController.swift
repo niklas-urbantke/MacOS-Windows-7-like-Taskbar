@@ -2,8 +2,34 @@ import AppKit
 import ServiceManagement
 
 /// Owns one taskbar window on a given screen and keeps it in sync with running apps.
+/// With "show on all screens" there is one controller per display; the primary one (menu-bar
+/// screen) owns everything that must exist only once (hotkeys, distributed notifications,
+/// recents tracking, Dock-pin import). Settings setters apply to every registered controller.
 final class TaskbarController: NSObject, TaskbarButtonDelegate {
+    // MARK: - Registry (all live taskbars)
+
+    private final class WeakRef {
+        weak var value: TaskbarController?
+        init(_ value: TaskbarController) { self.value = value }
+    }
+    private static var registry: [WeakRef] = []
+    /// All live taskbars, the primary one first.
+    static var allControllers: [TaskbarController] { registry.compactMap { $0.value } }
+    /// Screens that currently show a taskbar (used by the window-space reserver).
+    static var barScreens: [NSScreen] { allControllers.map { $0.screen } }
+    private static var primaryController: TaskbarController? { allControllers.first { $0.isPrimary } }
+
+    /// One settings window and one menu editor for all taskbars.
+    private static let sharedSettings = SettingsWindowController()
+    private static var menuEditor: MenuEditorWindowController?
+    /// Dock pins are imported once per app launch (not per screen, not per screen rebuild).
+    private static var didImportDockPins = false
+    /// The user's custom (drag) order, shared so every taskbar shows the same order.
+    private static var orderedKeys: [String] = []
+
     private let screen: NSScreen
+    /// Primary taskbar (menu-bar screen): hotkeys, notifications, recents, media + performance.
+    let isPrimary: Bool
     private let window: NSWindow
     private let glass = GlassBackgroundView()
     private let blur = NSVisualEffectView()
@@ -16,9 +42,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let wifiView = WifiView(frame: .zero)
     private let monitorView = HardwareMonitorView(frame: .zero)
     private let startMenu = StartMenuController()
-    private let reserver = WindowSpaceReserver()
+    private let startMenu11 = StartMenu11Controller()
+    // Windows-11-Tray (ersetzt clock/volume/battery/wifi/monitor/nowPlaying im Win11-Profil).
+    private let win11Clock = Win11ClockButton()
+    private let win11Performance = Win11PerformanceView()
+    private let win11Media = Win11MediaView()
+    private var reserver: WindowSpaceReserver { WindowSpaceReserver.shared }
     private let preview = WindowPreviewController()
-    private let settings = SettingsWindowController()
 
     private var items: [TaskbarItem] = []
     private var buttons: [TaskbarButton] = []
@@ -36,13 +66,12 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private var buttonY: CGFloat = 0
     private weak var draggingButton: TaskbarButton?
     private var dragOffsetX: CGFloat = 0
-    private var orderedKeys: [String] = []
 
-    private let calendarPopover = NSPopover()
     private let volumePopover = NSPopover()
 
-    init(screen: NSScreen) {
+    init(screen: NSScreen, isPrimary: Bool) {
         self.screen = screen
+        self.isPrimary = isPrimary
         let frame = NSRect(x: screen.frame.minX, y: screen.frame.minY,
                            width: screen.frame.width, height: Theme.barHeight)
         // Non-activating panel: clicks are delivered immediately without first pulling the
@@ -53,39 +82,95 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         panel.isFloatingPanel = false
         window = panel
         super.init()
+        Self.registry.removeAll { $0.value == nil }
+        Self.registry.append(WeakRef(self))
 
         configureWindow(frame: frame)
         buildChrome()
         startMenu.taskbarController = self
+        startMenu11.taskbarController = self
 
         orb.target = self
         orb.action = #selector(toggleStart)
         orb.onRightClick = { [weak self] in self?.showOrbMenu() }
-        startMenu.onVisibilityChanged = { [weak self] open in self?.orb.menuOpen = open }
+        startMenu.onVisibilityChanged = { [weak self] open in
+            self?.orb.menuOpen = open
+            if open {
+                Win11Flyouts.closeAll()   // Startmenü und Medien-Flyout nie gleichzeitig
+                self?.closeOtherStartMenus()
+            }
+        }
+        startMenu11.onVisibilityChanged = { [weak self] open in
+            self?.orb.menuOpen = open
+            if open {
+                Win11Flyouts.closeAll()   // Startmenü und Flyouts nie gleichzeitig
+                self?.closeOtherStartMenus()
+            }
+        }
         showDesktop.onClick = { [weak self] in self?.minimizeEverything() }
-        clock.onClick = { [weak self] in self?.showCalendar() }
+        // Kalender nur auf dem Hauptbildschirm; auf Nebenleisten ist die Uhr nicht anklickbar.
+        if isPrimary { clock.onClick = { [weak self] in self?.showCalendar() } }
+        win11Clock.opensCalendar = isPrimary
         volume.onClick = { [weak self] in self?.showVolume() }
         glass.onDropFiles = { [weak self] urls in self?.pinDroppedFiles(urls) }
 
         registerObservers()
-        installHotkey()
-        DistributedNotificationCenter.default().addObserver(
-            self, selector: #selector(toggleStart),
-            name: NSNotification.Name("de.batix.win7taskbar.toggleStart"), object: nil)
-        DistributedNotificationCenter.default().addObserver(
-            self, selector: #selector(testPreview),
-            name: NSNotification.Name("de.batix.win7taskbar.testPreview"), object: nil)
-        DistributedNotificationCenter.default().addObserver(
-            self, selector: #selector(openSettings),
-            name: NSNotification.Name("de.batix.win7taskbar.openSettings"), object: nil)
-        DistributedNotificationCenter.default().addObserver(
-            self, selector: #selector(openMenuEditorNotif),
-            name: NSNotification.Name("de.batix.win7taskbar.openEditor"), object: nil)
+        if isPrimary {
+            // Everything that must exist only once (otherwise it would fire once per screen).
+            _ = WindowSpaceReserver.shared
+            Self.sharedSettings.controller = self
+            installHotkey()
+            registerPrimaryObservers()
+            if !Self.didImportDockPins {
+                Self.didImportDockPins = true
+                PinStore.importDockPins(includeReleased: false)
+            }
+        }
         rebuildItems()
         startClock()
 
         window.orderFront(nil)
     }
+
+    /// Distributed notifications (external triggers) and recents tracking: primary taskbar only.
+    private func registerPrimaryObservers() {
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(self, selector: #selector(toggleStartFromHotkey),
+                        name: NSNotification.Name("de.batix.win7taskbar.toggleStart"), object: nil)
+        dnc.addObserver(self, selector: #selector(testPreview),
+                        name: NSNotification.Name("de.batix.win7taskbar.testPreview"), object: nil)
+        dnc.addObserver(self, selector: #selector(openSettings),
+                        name: NSNotification.Name("de.batix.win7taskbar.openSettings"), object: nil)
+        dnc.addObserver(self, selector: #selector(openMenuEditorNotif),
+                        name: NSNotification.Name("de.batix.win7taskbar.openEditor"), object: nil)
+
+        // Record recently opened apps for the Start menu.
+        let nc = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification] {
+            nc.addObserver(self, selector: #selector(recordRecent(_:)), name: name, object: nil)
+        }
+    }
+
+    /// Runs `body` on every live taskbar (settings apply to all screens).
+    private static func forAll(_ body: (TaskbarController) -> Void) { allControllers.forEach(body) }
+
+    /// Rebuild the button rows of all taskbars (after pin changes).
+    private static func rebuildAllItems(except skip: TaskbarController? = nil) {
+        forAll { if $0 !== skip { $0.rebuildItems() } }
+    }
+
+    /// Only one Start menu at a time across all screens.
+    private func closeOtherStartMenus() {
+        Self.forAll { c in
+            guard c !== self else { return }
+            c.startMenu.hide()
+            c.startMenu11.hide()
+        }
+    }
+
+    /// Media and performance views live on the primary taskbar only.
+    private var showsMedia: Bool { isPrimary && nowPlayingEnabled }
+    private var showsMonitor: Bool { isPrimary && monitorEnabled }
 
     // MARK: - Window & chrome
 
@@ -105,7 +190,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         blur.material = .underWindowBackground
         blur.blendingMode = .behindWindow
         blur.state = .active
-        blur.appearance = NSAppearance(named: .darkAqua)
+        blur.appearance = Theme.nsAppearance
         container.addSubview(blur)
 
         glass.frame = container.bounds
@@ -125,12 +210,64 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         for v in [showDesktop, clock, volume] { v.autoresizingMask = [.minXMargin]; glass.addSubview(v) }
         if hasBattery { battery.autoresizingMask = [.minXMargin]; glass.addSubview(battery) }
         for v in [nowPlayingView, wifiView, monitorView] { v.autoresizingMask = [.minXMargin] }
+        for v: NSView in [win11Clock, win11Performance, win11Media] {
+            v.autoresizingMask = [.minXMargin]
+        }
 
         layoutTray()
     }
 
     /// Positions the tray (right side) and the now-playing widget, then re-lays out the buttons.
+    /// Each profile owns its own set of tray views; the other set is detached from the hierarchy.
     private func layoutTray() {
+        if Theme.isWin11 {
+            for v: NSView in [clock, volume, battery, wifiView, monitorView, nowPlayingView] { v.removeFromSuperview() }
+            layoutTrayWin11()
+        } else {
+            for v: NSView in [win11Clock, win11Performance, win11Media] { v.removeFromSuperview() }
+            for v: NSView in [clock, volume] where v.superview == nil { glass.addSubview(v) }
+            if hasBattery && battery.superview == nil { glass.addSubview(battery) }
+            layoutTrayClassic()
+        }
+        layoutButtons()
+    }
+
+    /// Windows 11 tray, right to left: show-desktop sliver, clock, performance, media.
+    /// (No WLAN/volume/battery icons: macOS shows those in its menu bar.)
+    private func layoutTrayWin11() {
+        typealias W = Theme.Win11
+        let h = Theme.barHeight
+        let gap = W.s(4)
+        var x = glass.bounds.width
+
+        x -= W.showDesktopWidth
+        showDesktop.frame = NSRect(x: x, y: 0, width: W.showDesktopWidth, height: h)
+        if showDesktop.superview == nil { glass.addSubview(showDesktop) }
+
+        func place(_ v: NSView, width: CGFloat) {
+            x -= gap + width
+            v.frame = NSRect(x: x, y: 0, width: width, height: h)
+            if v.superview == nil { glass.addSubview(v) }
+        }
+
+        place(win11Clock, width: win11Clock.preferredWidth)
+        win11Clock.refresh()
+
+        if showsMonitor {
+            place(win11Performance, width: win11Performance.preferredWidth)
+            win11Performance.refresh()
+        } else { win11Performance.removeFromSuperview() }
+
+        if showsMedia {
+            place(win11Media, width: win11Media.preferredWidth)
+            win11Media.refresh()
+        } else { win11Media.removeFromSuperview() }
+
+        trayLeftX = x
+    }
+
+    /// Vista / Windows 7 tray.
+    private func layoutTrayClassic() {
         let h = Theme.barHeight
         let gap: CGFloat = 10          // uniform spacing between tray elements
         var x = glass.bounds.width
@@ -154,14 +291,14 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             wifiView.refresh()
         } else { wifiView.removeFromSuperview() }
 
-        if monitorEnabled {
+        if showsMonitor {
             monitorView.frame = slot(Theme.monitorWidth)
             if monitorView.superview == nil { glass.addSubview(monitorView) }
             monitorView.refresh()
         } else { monitorView.removeFromSuperview() }
 
-        if nowPlayingEnabled {
-            nowPlayingView.frame = slot(Theme.nowPlayingWidth)
+        if showsMedia {
+            nowPlayingView.frame = slot(nowPlayingView.preferredWidth)
             if nowPlayingView.superview == nil { glass.addSubview(nowPlayingView) }
             nowPlayingView.refresh()
         } else {
@@ -169,7 +306,6 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         }
 
         trayLeftX = x
-        layoutButtons()
     }
 
     // MARK: - Items
@@ -186,13 +322,17 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         for key in pinnedKeys {
             let match = running.first { $0.bundleIdentifier == key }
             if let app = match { usedRunning.insert(app.processIdentifier) }
-            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: key)
+            // After an uninstall LaunchServices still finds the app in the Trash: treat that
+            // (or a vanished file) as not installed, so the pin disappears right away.
+            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: key).flatMap {
+                !$0.path.contains("/.Trash/") && FileManager.default.fileExists(atPath: $0.path) ? $0 : nil
+            }
             let name = match?.localizedName ?? url.flatMap {
                 ($0.lastPathComponent as NSString).deletingPathExtension
             } ?? key
             guard match != nil || url != nil else { continue }
-            let icon = match?.icon ?? url.map { NSWorkspace.shared.icon(forFile: $0.path) }
-                ?? NSImage()
+            let icon = Self.largeArtIcon(match?.icon ?? url.map { NSWorkspace.shared.icon(forFile: $0.path) }
+                ?? NSImage())
             newItems.append(TaskbarItem(key: key, name: name, icon: icon, url: url,
                                         runningApp: match, pinned: true))
         }
@@ -201,17 +341,21 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         for app in running where !usedRunning.contains(app.processIdentifier) {
             let key = app.bundleIdentifier ?? app.bundleURL?.path ?? "\(app.processIdentifier)"
             let name = app.localizedName ?? "App"
-            let icon = app.icon ?? NSImage()
+            let icon = Self.largeArtIcon(app.icon ?? NSImage())
             newItems.append(TaskbarItem(key: key, name: name, icon: icon,
                                         url: app.bundleURL, runningApp: app, pinned: false))
         }
 
         // Preserve the user's custom (drag) order; append any new items at the end.
+        // The order is shared, so every screen's taskbar shows the same sequence.
+        let savedOrder = Self.orderedKeys
         var ordered: [TaskbarItem] = []
-        for key in orderedKeys {
+        for key in savedOrder {
             if let item = newItems.first(where: { $0.key == key }) { ordered.append(item) }
         }
-        for item in newItems where !orderedKeys.contains(item.key) { ordered.append(item) }
+        for item in newItems where !savedOrder.contains(item.key) { ordered.append(item) }
+        // Pinned apps always come first; running apps that are not pinned stay on the right.
+        ordered = ordered.filter { $0.pinned } + ordered.filter { !$0.pinned }
 
         // Custom Finder icon (this taskbar only), if the user set one.
         if let img = customFinderIcon() {
@@ -219,8 +363,19 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         }
 
         items = ordered
-        orderedKeys = items.map { $0.key }
+        Self.orderedKeys = items.map { $0.key }
         layoutButtons()
+    }
+
+    /// Some apps (Postman, Slack …) ship different artwork in their small icon sizes (up to 64 px).
+    /// A 1x screen picks those for the taskbar size, a Retina screen the large ones, so the same app
+    /// looked different per screen. Keep only the large representations (downscaled when drawn).
+    private static func largeArtIcon(_ image: NSImage) -> NSImage {
+        let large = image.representations.filter { $0.pixelsWide >= 128 }
+        guard !large.isEmpty, large.count < image.representations.count else { return image }
+        let icon = NSImage(size: image.size)
+        icon.addRepresentations(large)
+        return icon
     }
 
     // MARK: - Custom Finder icon (taskbar-only override)
@@ -242,13 +397,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         do {
             try FileManager.default.copyItem(at: src, to: dest)
             UserDefaults.standard.set(dest.path, forKey: "finderIconPath")
-            rebuildItems()
+            Self.rebuildAllItems()
         } catch { NSLog("Finder-Icon setzen fehlgeschlagen: \(error)") }
     }
     func clearFinderIcon() {
         try? FileManager.default.removeItem(at: iconsDir.appendingPathComponent("finderIcon"))
         UserDefaults.standard.removeObject(forKey: "finderIconPath")
-        rebuildItems()
+        Self.rebuildAllItems()
     }
 
     private func slotX(_ i: Int) -> CGFloat { buttonStartX + CGFloat(i) * buttonPitch }
@@ -256,6 +411,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private func layoutButtons() {
         buttons.forEach { $0.removeFromSuperview() }
         buttons.removeAll()
+
+        if Theme.isWin11 { layoutButtonsWin11(); return }
+
+        // Vista/Win7: the orb sits fixed at the left edge.
+        orb.frame = NSRect(x: 0, y: 0, width: Theme.orbWidth, height: Theme.barHeight)
 
         let startX = Theme.orbWidth + 4   // Abstand zwischen Orb und erstem Icon
         let endX = trayLeftX - 6
@@ -283,8 +443,55 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         updateWindowCounts()
     }
 
+    /// Windows 11: start button + app slots form ONE group, centred on the screen (or left-aligned),
+    /// clamped so it never runs into the tray. Slots shrink when the bar gets full.
+    private func layoutButtonsWin11() {
+        typealias W = Theme.Win11
+        let h = Theme.barHeight
+        let leftBound: CGFloat = 12
+        let rightBound = trayLeftX - 6
+        let startW = W.startWidth
+        let spacing = W.slotSpacing
+        let idealPitch = W.slotWidth + spacing
+        let n = CGFloat(items.count)
+
+        // Pitch = slot + spacing; the group is start + n × pitch (spacing before each slot).
+        let roomForSlots = max(0, rightBound - leftBound - startW)
+        let pitch = n > 0 ? max(spacing + 1, min(idealPitch, roomForSlots / n)) : idealPitch
+        let groupW = startW + n * pitch
+
+        var groupX = leftBound
+        if Theme.win11Centered {
+            // Glass spans the whole screen width, so its midpoint is the screen centre.
+            groupX = (glass.bounds.width - groupW) / 2
+            groupX = min(groupX, rightBound - groupW)
+            groupX = max(groupX, leftBound)
+        }
+        groupX = groupX.rounded()
+
+        orb.frame = NSRect(x: groupX, y: 0, width: startW, height: h)
+
+        guard !items.isEmpty else { return }
+        buttonStartX = groupX + startW + spacing
+        buttonPitch = pitch
+        buttonW = pitch - spacing
+        let slotH = min(h, W.slotHeight)
+        buttonY = ((h - slotH) / 2).rounded()
+
+        for (i, item) in items.enumerated() {
+            let b = TaskbarButton(item: item)
+            b.buttonDelegate = self
+            b.frame = NSRect(x: slotX(i), y: buttonY, width: buttonW, height: slotH)
+            glass.addSubview(b)
+            buttons.append(b)
+        }
+        updateWindowCounts()
+    }
+
     /// Asynchronously counts each running app's windows (AX) for the grouped "stacked" look.
-    private func updateWindowCounts() {
+    /// `allBars`: apply the result to every taskbar (all bars show the same apps, so the
+    /// periodic count runs once on the primary bar instead of once per screen).
+    private func updateWindowCounts(allBars: Bool = false) {
         let snapshot: [(String, pid_t)] = items.compactMap {
             guard let app = $0.runningApp, !app.isTerminated else { return nil }
             return ($0.key, app.processIdentifier)
@@ -299,17 +506,22 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             let badges = DockBadges.current()   // [appName: badge] (Slack/Teams unread …)
             DispatchQueue.main.async {
                 guard let self else { return }
-                var changed = false
-                for item in self.items {
-                    if let c = counts[item.key], item.windowCount != c {
-                        item.windowCount = c; changed = true
-                    }
-                    let newBadge = badges[item.name]
-                    if item.badge != newBadge { item.badge = newBadge; changed = true }
-                }
-                if changed { self.buttons.forEach { $0.needsDisplay = true } }
+                let targets = allBars ? Self.allControllers : [self]
+                for c in targets { c.applyWindowCounts(counts, badges: badges) }
             }
         }
+    }
+
+    private func applyWindowCounts(_ counts: [String: Int], badges: [String: String]) {
+        var changed = false
+        for item in items {
+            if let c = counts[item.key], item.windowCount != c {
+                item.windowCount = c; changed = true
+            }
+            let newBadge = badges[item.name]
+            if item.badge != newBadge { item.badge = newBadge; changed = true }
+        }
+        if changed { buttons.forEach { $0.needsDisplay = true } }
     }
 
     // MARK: - TaskbarButtonDelegate
@@ -324,10 +536,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
                 return
             }
             // 2) Grouped app (several windows): show the previews so the user picks one.
-            if item.windowCount > 1, let button {
+            //    Only with the built-in preview; with DockDoor (already shown on hover) or no
+            //    preview the click activates the app like a single-window one.
+            if Theme.previewMode == .builtin, item.windowCount > 1, let button {
                 taskbarButtonHover(item, button: button)
                 return
             }
+            if Theme.previewMode == .dockdoor { DockDoorBridge.hide() }
             // 3) Single window: toggle front/hide, restore, or open a new window.
             let s = WindowPreview.windowSummary(pid: pid)
             if s.visible > 0 {
@@ -362,18 +577,26 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     func pinToTaskbar(bundleID: String?) {
         guard let id = bundleID else { return }
         var keys = PinStore.load()
-        if !keys.contains(id) { keys.append(id); PinStore.save(keys); rebuildItems() }
+        if !keys.contains(id) { keys.append(id); PinStore.save(keys); Self.rebuildAllItems() }
     }
 
     func taskbarButtonToggledPin(_ item: TaskbarItem) {
         var keys = PinStore.load()
         if item.pinned {
             keys.removeAll { $0 == item.key }
+            // Forget its slot, so the (still running) app moves to the far right.
+            Self.orderedKeys.removeAll { $0 == item.key }
         } else if !keys.contains(item.key) {
             keys.append(item.key)
         }
         PinStore.save(keys)
-        rebuildItems()
+        Self.rebuildAllItems()
+    }
+
+    /// Import the apps pinned in the macOS Dock again, including ones released here before.
+    func importDockPins() {
+        PinStore.importDockPins(includeReleased: true)
+        Self.rebuildAllItems()
     }
 
     func taskbarButtonQuit(_ item: TaskbarItem) {
@@ -398,12 +621,48 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         let f = button.frame   // in glass (== window content) coordinates
         let anchor = NSRect(x: window.frame.minX + f.minX, y: window.frame.minY + f.minY,
                             width: f.width, height: f.height)
-        preview.show(pid: app.processIdentifier, appName: item.name, icon: item.icon,
-                     anchorRect: anchor, screen: screen)
+        let showBuiltin = { [weak self] in
+            guard let self else { return }
+            self.preview.show(pid: app.processIdentifier, appName: item.name, icon: item.icon,
+                              anchorRect: anchor, screen: self.screen)
+        }
+        switch Theme.previewMode {
+        case .builtin:
+            showBuiltin()
+        case .dockdoor:
+            guard let bundleID = app.bundleIdentifier else { showBuiltin(); return }
+            preview.scheduleHide()   // a built-in preview of a media app (see below) closes
+            // DockDoor places its preview relative to the top of the frame, like above a Dock
+            // icon: pass the full bar height so it sits just above the bar, not over it.
+            let column = NSRect(x: anchor.minX, y: window.frame.minY,
+                                width: anchor.width, height: window.frame.height)
+            // For the playing media app DockDoor would only flash its media widget: the built-in
+            // preview shows the app's real windows instead.
+            DockDoorBridge.show(bundleID: bundleID, anchor: column, screen: screen,
+                                mediaFallback: showBuiltin)
+        case .off:
+            break
+        }
     }
 
     func taskbarButtonHoverEnded() {
+        switch Theme.previewMode {
+        case .builtin:
+            preview.scheduleHide()
+        case .dockdoor:
+            // DockDoor hides its preview itself once the mouse is neither over the button nor over
+            // the preview (so the mouse can move into it); only a not yet sent show is dropped.
+            DockDoorBridge.cancelPending()
+            preview.scheduleHide()
+        case .off:
+            break
+        }
+    }
+
+    /// Closes the hover preview of this taskbar (built-in and DockDoor).
+    private func hidePreviews() {
         preview.scheduleHide()
+        if Theme.previewMode == .dockdoor { DockDoorBridge.hide() }
     }
 
     // MARK: - Drag reordering
@@ -411,7 +670,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     func taskbarButtonDragBegan(_ button: TaskbarButton, atX x: CGFloat) {
         draggingButton = button
         dragOffsetX = x - button.frame.minX
-        preview.scheduleHide()
+        hidePreviews()
         glass.addSubview(button)   // float above the others
     }
 
@@ -429,7 +688,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         if to != from {
             let b = buttons.remove(at: from); buttons.insert(b, at: to)
             let it = items.remove(at: from); items.insert(it, at: to)
-            orderedKeys = items.map { $0.key }
+            Self.orderedKeys = items.map { $0.key }
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.16
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -448,8 +707,10 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             button.animator().setFrameOrigin(NSPoint(x: slotX(idx), y: buttonY))
         }
-        // Persist the new order of pinned apps.
+        // Persist the new order of pinned apps; the other screens' taskbars follow the new order
+        // (this bar keeps its buttons so the settle animation is not cut off).
         PinStore.save(items.filter { $0.pinned }.map { $0.key })
+        Self.rebuildAllItems(except: self)
     }
 
     /// Debug hook: show the preview for the first running app's button (used for testing).
@@ -467,11 +728,26 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
     // MARK: - Start orb & show desktop
 
+    /// Opens / closes the Start menu of THIS taskbar, on its own screen.
     @objc private func toggleStart() {
         let orbScreenRect = NSRect(x: window.frame.minX + orb.frame.minX,
                                    y: window.frame.minY + orb.frame.minY,
                                    width: orb.frame.width, height: orb.frame.height)
-        startMenu.toggle(relativeTo: orbScreenRect, on: screen)
+        if Theme.isWin11 {
+            startMenu11.toggle(relativeTo: orbScreenRect, on: screen)
+        } else {
+            startMenu.toggle(relativeTo: orbScreenRect, on: screen)
+        }
+    }
+
+    /// Hotkey / external trigger (primary only): an open Start menu closes, otherwise the menu
+    /// opens on the taskbar of the screen under the mouse pointer.
+    @objc private func toggleStartFromHotkey() {
+        let all = Self.allControllers
+        if let open = all.first(where: { $0.orb.menuOpen }) { open.toggleStart(); return }
+        let mouse = NSEvent.mouseLocation
+        let target = all.first { NSMouseInRect(mouse, $0.screen.frame, false) } ?? self
+        target.toggleStart()
     }
 
     private func showOrbMenu() {
@@ -486,13 +762,14 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         menu.popUp(positioning: nil, at: NSPoint(x: orb.frame.minX, y: orb.frame.maxY), in: glass)
     }
 
+    /// One shared settings window, whichever taskbar opens it (its setters apply to all bars).
     @objc private func openSettings() {
-        settings.controller = self
-        settings.show()
+        Self.sharedSettings.controller = self
+        Self.sharedSettings.show()
     }
     @objc private func quitApp() { NSApp.terminate(nil) }
 
-    // MARK: - Settings (used by the settings window)
+    // MARK: - Settings (used by the settings window; every setter applies to all taskbars)
 
     var dockIsHidden: Bool { DockHelper.isHidden }
     func setDockHidden(_ on: Bool) { if on != DockHelper.isHidden { DockHelper.toggle() } }
@@ -510,18 +787,18 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     var nowPlayingEnabled: Bool { UserDefaults.standard.bool(forKey: "showNowPlaying") }
     func setShowNowPlaying(_ on: Bool) {
         UserDefaults.standard.set(on, forKey: "showNowPlaying")
-        layoutTray()
+        Self.forAll { $0.layoutTray() }
     }
 
     // WLAN-Symbol (Standard: an).
     var wifiEnabled: Bool {
         UserDefaults.standard.object(forKey: "showWifi") == nil ? true : UserDefaults.standard.bool(forKey: "showWifi")
     }
-    func setShowWifi(_ on: Bool) { UserDefaults.standard.set(on, forKey: "showWifi"); layoutTray() }
+    func setShowWifi(_ on: Bool) { UserDefaults.standard.set(on, forKey: "showWifi"); Self.forAll { $0.layoutTray() } }
 
     // Hardware-Monitor (Standard: aus).
     var monitorEnabled: Bool { UserDefaults.standard.bool(forKey: "showMonitor") }
-    func setShowMonitor(_ on: Bool) { UserDefaults.standard.set(on, forKey: "showMonitor"); layoutTray() }
+    func setShowMonitor(_ on: Bool) { UserDefaults.standard.set(on, forKey: "showMonitor"); Self.forAll { $0.layoutTray() } }
 
     // Finder-Desktopfenster ausblenden (Standard: an).
     var hideFinderDesktopEnabled: Bool {
@@ -529,58 +806,172 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     }
     func setHideFinderDesktop(_ on: Bool) {
         UserDefaults.standard.set(on, forKey: "hideFinderDesktop")
-        updateWindowCounts()
+        updateWindowCounts(allBars: true)
     }
 
-    // Leistenhöhe (px) — alles andere skaliert proportional mit.
+    // Uhr mit Sekunden (Standard: an). Die Win11-Uhr liest Theme.clockShowsSeconds selbst.
+    var clockSeconds: Bool { Theme.clockShowsSeconds }
+    func setClockSeconds(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "clockSeconds")
+        Self.forAll { c in
+            c.layoutTray()          // clock width depends on the seconds
+            c.clock.refresh()
+            c.win11Clock.refresh()
+        }
+    }
+
+    // Fenstervorschau beim Hovern: "builtin" | "dockdoor" | "off" (gilt für alle Leisten).
+    var previewMode: String { Theme.previewMode.rawValue }
+    func setPreviewMode(_ raw: String) {
+        guard let mode = Theme.PreviewMode(rawValue: raw) else { return }
+        UserDefaults.standard.set(mode.rawValue, forKey: "previewMode")
+        // Offene Vorschauen beider Arten schließen, egal welche Art jetzt gilt.
+        Self.forAll { $0.preview.scheduleHide() }
+        DockDoorBridge.hide()
+    }
+
+    // Taskleiste auf allen Bildschirmen (Standard: an). Baut alle Leisten neu auf (AppDelegate).
+    var showOnAllScreens: Bool { Theme.showOnAllScreens }
+    func setShowOnAllScreens(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "allScreens")
+        // Async: the rebuild tears down this controller, so let the current call finish first.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .taskbarRebuildScreens, object: nil)
+        }
+    }
+
+    // Leistenhöhe (px), alles andere skaliert proportional mit.
     var barHeightValue: CGFloat { Theme.barHeight }
     var minBarHeight: CGFloat { Theme.minHeight }
     var maxBarHeight: CGFloat { Theme.maxHeight }
     func setBarHeight(_ h: CGFloat) {
         UserDefaults.standard.set(Double(h), forKey: "barHeight")
-        applyBarHeight()
+        Self.forAll { $0.applyBarHeight() }
+    }
+    /// Sets the bar height so the icons are exactly as large as the macOS Dock icons.
+    func matchDockSize() {
+        UserDefaults.standard.set(Double(Theme.Win11.recommendedBarHeight), forKey: "barHeight")
+        Self.forAll { $0.applyBarHeight() }
     }
     private func applyBarHeight() {
         let f = NSRect(x: screen.frame.minX, y: screen.frame.minY,
                        width: screen.frame.width, height: Theme.barHeight)
         window.setFrame(f, display: true)
-        orb.frame = NSRect(x: 0, y: 0, width: Theme.orbWidth, height: Theme.barHeight)
-        layoutTray()   // repositions tray + buttons at the new scale
+        layoutTray()   // repositions tray, start button + buttons at the new scale
     }
 
     // Icon-Rahmen über volle Höhe.
     var fullHeightIcons: Bool { UserDefaults.standard.bool(forKey: "fullHeightIcons") }
     func setFullHeightIcons(_ on: Bool) {
         UserDefaults.standard.set(on, forKey: "fullHeightIcons")
-        buttons.forEach { $0.needsDisplay = true }
+        Self.forAll { $0.buttons.forEach { $0.needsDisplay = true } }
     }
 
     // Startmenü-Stil: "accent" (Akzentfarbe) oder "aero" (Taskbar-Glas).
     var menuStyle: String { UserDefaults.standard.string(forKey: "menuStyle") ?? "accent" }
     func setMenuStyle(_ style: String) { UserDefaults.standard.set(style, forKey: "menuStyle") }
 
-    // Editor für die rechte Spalte des Startmenüs.
-    private var menuEditor: MenuEditorWindowController?
+    // Editor für die rechte Spalte des Startmenüs (eine Instanz für alle Leisten).
     @objc private func openMenuEditorNotif() { openMenuEditor() }
     func openMenuEditor() {
-        if menuEditor == nil {
+        if Self.menuEditor == nil {
             let editor = MenuEditorWindowController()
-            editor.onChange = { [weak self] in self?.startMenu.reloadRightColumn() }
-            menuEditor = editor
+            editor.onChange = { Self.forAll { $0.startMenu.reloadRightColumn() } }
+            Self.menuEditor = editor
         }
-        menuEditor?.show()
+        Self.menuEditor?.show()
     }
 
-    // Taskleisten-Stil-Profil: "vista" (dunkles Glas) oder "win7" (helles Aero-Glas).
+    // Taskleisten-Stil-Profil: "vista" (dunkles Glas), "win7" (helles Aero-Glas) oder "win11".
     var taskbarStyle: String { Theme.taskbarStyle.rawValue }
     func setTaskbarStyle(_ raw: String) {
-        UserDefaults.standard.set(raw, forKey: "taskbarStyle")
+        let d = UserDefaults.standard
+        let old = Theme.taskbarStyle
         let style = Theme.TaskbarStyle(rawValue: raw) ?? .vista
-        // Apply the profile's recommended blur/opacity (the user can still fine-tune afterwards).
-        UserDefaults.standard.set(Double(Theme.defaultBlur(for: style)), forKey: "taskbarBlur")
-        UserDefaults.standard.set(Double(Theme.defaultOpacity(for: style)), forKey: "taskbarOpacity")
+        // Win11 kommt in Dock-Größe (Icons so groß wie im macOS-Dock); die bisherige Höhe wird
+        // gemerkt und beim Zurückwechseln wiederhergestellt.
+        if style == .win11 && old != .win11 {
+            d.set(Double(Theme.barHeight), forKey: "barHeightBeforeWin11")
+            d.set(Double(Theme.Win11.recommendedBarHeight), forKey: "barHeight")
+        } else if style != .win11 && old == .win11 {
+            if let h = d.object(forKey: "barHeightBeforeWin11") as? Double { d.set(h, forKey: "barHeight") }
+            d.removeObject(forKey: "barHeightBeforeWin11")
+        }
+        d.set(style.rawValue, forKey: "taskbarStyle")
+        if style != .win11 {
+            // Apply the profile's recommended blur/opacity (the user can still fine-tune afterwards).
+            d.set(Double(Theme.defaultBlur(for: style)), forKey: "taskbarBlur")
+            d.set(Double(Theme.defaultOpacity(for: style)), forKey: "taskbarOpacity")
+        }
+        Win11Flyouts.closeAll()
+        Self.forAll { $0.applyStyleChange() }
+    }
+
+    /// Applies a changed style profile to this taskbar (menus of the old profile close).
+    private func applyStyleChange() {
+        startMenu.hide()
+        startMenu11.hide()
+        hidePreviews()
+        applyAppearance()
+        applyBarHeight()
+        reloadEverything()
+        startMenu11.applyAppearance()
+    }
+
+    // Farbmodus aller Profile ("system" | "light" | "dark"), gespeichert unter dem bisherigen
+    // Win11-Schlüssel.
+    var win11Appearance: String { Theme.appearanceMode.rawValue }
+    func setWin11Appearance(_ raw: String) {
+        UserDefaults.standard.set(raw, forKey: "win11Appearance")
+        Self.forAll { $0.applyColorModeChange() }
+    }
+
+    // Windows-11-Profil: Acryl-Transparenz (Standard: an).
+    var win11Acrylic: Bool { Theme.win11Acrylic }
+    func setWin11Acrylic(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "win11Acrylic")
+        Self.forAll { $0.applyWin11Change() }
+    }
+
+    // Acryl je Fläche (Leiste, Startmenü, Flyouts): Frost und Tönung, jeweils 0…1.
+    // Die Flyouts lesen ihre Werte beim Öffnen, deshalb werden offene geschlossen.
+    func win11Frost(_ role: Theme.Win11.Surface) -> CGFloat { Theme.Win11.frost(role) }
+    func win11Tint(_ role: Theme.Win11.Surface) -> CGFloat { Theme.Win11.tint(role) }
+    func setWin11Frost(_ v: CGFloat, for role: Theme.Win11.Surface) {
+        UserDefaults.standard.set(Double(v), forKey: "win11Frost.\(role.rawValue)")
+        applyWin11Surface(role)
+    }
+    func setWin11Tint(_ v: CGFloat, for role: Theme.Win11.Surface) {
+        UserDefaults.standard.set(Double(v), forKey: "win11Tint.\(role.rawValue)")
+        applyWin11Surface(role)
+    }
+    private func applyWin11Surface(_ role: Theme.Win11.Surface) {
+        switch role {
+        case .bar:    Self.forAll { $0.applyAppearance(); $0.glass.needsDisplay = true }
+        case .menu:   Self.forAll { $0.startMenu11.applyAppearance() }
+        case .flyout: Win11Flyouts.closeAll()
+        }
+    }
+
+    // Windows-11-Profil: Symbolausrichtung ("center" | "left").
+    var win11Alignment: String { Theme.win11Centered ? "center" : "left" }
+    func setWin11Alignment(_ raw: String) {
+        UserDefaults.standard.set(raw == "left" ? "left" : "center", forKey: "win11Alignment")
+        Self.forAll { $0.applyWin11Change() }
+    }
+
+    private func applyWin11Change() {
         applyAppearance()
         reloadEverything()
+        startMenu11.applyAppearance()
+    }
+
+    /// Farbmodus oder Akzentfarbe geändert: Leiste, beide Startmenüs und offene Popover neu anwenden
+    /// (in jedem Profil, auch das gerade nicht sichtbare Startmenü bleibt so aktuell).
+    private func applyColorModeChange() {
+        applyWin11Change()
+        startMenu.applyAppearance()
+        volumePopover.appearance = Theme.nsAppearance
     }
 
     /// Full visual reload — rebuild the button row and redraw all chrome (used on theme switch).
@@ -598,37 +989,52 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     var win7GlassStrength: CGFloat { Theme.win7GlassStrength }
     func setWin7GlassStrength(_ v: CGFloat) {
         UserDefaults.standard.set(Double(v), forKey: "win7GlassStrength")
-        buttons.forEach { $0.needsDisplay = true }
+        Self.forAll { $0.buttons.forEach { $0.needsDisplay = true } }
     }
 
     // Transparenz / Unschärfe der Taskleiste (jeweils 0…1).
     var taskbarBlur: CGFloat { Theme.taskbarBlur }
     var taskbarOpacity: CGFloat { Theme.taskbarOpacity }
     func setTaskbarBlur(_ v: CGFloat) {
-        UserDefaults.standard.set(Double(v), forKey: "taskbarBlur"); applyAppearance()
+        UserDefaults.standard.set(Double(v), forKey: "taskbarBlur"); Self.forAll { $0.applyAppearance() }
     }
     func setTaskbarOpacity(_ v: CGFloat) {
-        UserDefaults.standard.set(Double(v), forKey: "taskbarOpacity"); applyAppearance()
+        UserDefaults.standard.set(Double(v), forKey: "taskbarOpacity"); Self.forAll { $0.applyAppearance() }
     }
     private func applyAppearance() {
-        blur.alphaValue = Theme.taskbarBlur
-        glass.alphaValue = Theme.taskbarOpacity
+        if Theme.isWin11 {
+            // Win11: Acryl-Blur nach Farbmodus (versteckt bei ausgeschaltetem Acryl), Fläche voll deckend
+            // gezeichnet (die Deckkraft steckt schon in Theme.Win11.surface).
+            Theme.Win11.configureBlur(blur, for: .bar)
+            glass.alphaValue = 1
+            window.appearance = Theme.win11NSAppearance   // Kontextmenüs folgen dem Farbmodus
+        } else {
+            // Vista/Win7: Frost-Schicht und Kontextmenüs folgen dem Farbmodus (hell = helles Glas).
+            blur.material = .underWindowBackground
+            blur.blendingMode = .behindWindow
+            blur.state = .active
+            blur.appearance = Theme.nsAppearance
+            blur.isHidden = false
+            blur.alphaValue = Theme.taskbarBlur
+            glass.alphaValue = Theme.taskbarOpacity
+            window.appearance = Theme.nsAppearance
+        }
     }
 
-    // Transparenz / Unschärfe des Startmenüs (jeweils 0…1) – an das Startmenü weitergereicht.
+    // Transparenz / Unschärfe des Startmenüs (jeweils 0…1), an das Startmenü weitergereicht.
     var menuBlur: CGFloat { Theme.menuBlur }
     var menuOpacity: CGFloat { Theme.menuOpacity }
     func setMenuBlur(_ v: CGFloat) {
-        UserDefaults.standard.set(Double(v), forKey: "menuBlur"); startMenu.applyAppearance()
+        UserDefaults.standard.set(Double(v), forKey: "menuBlur"); Self.forAll { $0.startMenu.applyAppearance() }
     }
     func setMenuOpacity(_ v: CGFloat) {
-        UserDefaults.standard.set(Double(v), forKey: "menuOpacity"); startMenu.applyAppearance()
+        UserDefaults.standard.set(Double(v), forKey: "menuOpacity"); Self.forAll { $0.startMenu.applyAppearance() }
     }
 
     // Start-Orb-Auswahl.
     var availableOrbs: [(label: String, file: String)] { OrbCatalog.available().map { ($0.label, $0.file) } }
     var selectedOrbFile: String { OrbCatalog.selectedFile }
-    func setOrb(_ file: String) { OrbCatalog.select(file); orb.reloadOrb() }
+    func setOrb(_ file: String) { OrbCatalog.select(file); Self.forAll { $0.orb.reloadOrb() } }
 
     /// Import a PNG as a new orb; returns its filename (and applies it).
     func addOrb(from url: URL) -> String? {
@@ -664,45 +1070,42 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     // MARK: - Clock
 
     private func startClock() {
-        clock.refresh()
-        battery.refresh()
+        if Theme.isWin11 {
+            win11Clock.refresh()
+        } else {
+            clock.refresh()
+            battery.refresh()
+        }
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.clock.refresh()
-            self.battery.refresh()
             self.updateBarVisibility()
             self.tick += 1
-            if self.tick % 2 == 0 { self.updateWindowCounts() }
-            if self.wifiEnabled && self.tick % 5 == 0 { self.wifiView.refresh() }
-            if self.monitorEnabled && self.tick % 2 == 0 { self.monitorView.refresh() }
-            if self.nowPlayingEnabled && self.tick % 3 == 0 { self.nowPlayingView.refresh() }
+            // Window counts / badges: counted once (primary) and applied to every taskbar.
+            if self.isPrimary && self.tick % 2 == 0 { self.updateWindowCounts(allBars: true) }
+            if Theme.isWin11 {
+                // Only the Win11 tray views are in the hierarchy in this profile.
+                self.win11Clock.refresh()
+                if self.showsMonitor && self.tick % 2 == 0 { self.win11Performance.refresh() }
+                if self.showsMedia && self.tick % 2 == 0 { self.win11Media.refresh() }
+            } else {
+                self.clock.refresh()
+                self.battery.refresh()
+                if self.wifiEnabled && self.tick % 5 == 0 { self.wifiView.refresh() }
+                if self.showsMonitor && self.tick % 2 == 0 { self.monitorView.refresh() }
+                if self.showsMedia && self.tick % 3 == 0 { self.nowPlayingView.refresh() }
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         clockTimer = timer
     }
 
-    // MARK: - Popovers (calendar & volume)
+    // MARK: - Calendar flyout & volume popover
 
+    /// Kalender-Flyout (wie im Win11-Profil, gezeichnet im Aero-Stil), rechtsbündig über der Uhr.
     private func showCalendar() {
-        if calendarPopover.isShown { calendarPopover.close(); return }
-        let picker = NSDatePicker()
-        picker.datePickerStyle = .clockAndCalendar
-        picker.datePickerElements = [.yearMonthDay, .hourMinuteSecond]
-        picker.dateValue = Date()
-        picker.isBezeled = false
-        picker.drawsBackground = false
-        picker.sizeToFit()
-
-        let vc = NSViewController()
-        let pad: CGFloat = 12
-        let container = NSView(frame: picker.frame.insetBy(dx: -pad, dy: -pad))
-        picker.setFrameOrigin(NSPoint(x: pad, y: pad))
-        container.addSubview(picker)
-        vc.view = container
-
-        calendarPopover.contentViewController = vc
-        calendarPopover.behavior = .transient
-        calendarPopover.show(relativeTo: clock.bounds, of: clock, preferredEdge: .maxY)
+        guard let anchor = Win11TrayDraw.screenRect(of: clock, clock.bounds),
+              let screen = Win11TrayDraw.screen(of: clock) else { return }
+        Win11Flyouts.showCalendar(anchor: anchor, screen: screen)
     }
 
     private func showVolume() {
@@ -710,6 +1113,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         let vc = VolumePopoverVC()
         volumePopover.contentViewController = vc
         volumePopover.behavior = .transient
+        volumePopover.appearance = Theme.nsAppearance
         volumePopover.show(relativeTo: volume.bounds, of: volume, preferredEdge: .maxY)
     }
 
@@ -728,10 +1132,6 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         for name in names {
             nc.addObserver(self, selector: #selector(appsChanged), name: name, object: nil)
         }
-        // Record recently opened apps for the Start menu.
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification] {
-            nc.addObserver(self, selector: #selector(recordRecent(_:)), name: name, object: nil)
-        }
         // Hide the bar when an app goes into native full screen (its own Space).
         for name: NSNotification.Name in [
             NSWorkspace.activeSpaceDidChangeNotification,
@@ -739,6 +1139,33 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         ] {
             nc.addObserver(self, selector: #selector(updateBarVisibility), name: name, object: nil)
         }
+
+        // Hell/Dunkel-Wechsel von macOS (Farbmodus "System" folgt ihm) und Akzentfarben-Wechsel.
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(interfaceThemeChanged),
+            name: NSNotification.Name("AppleInterfaceThemeChangedNotification"), object: nil)
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(interfaceThemeChanged),
+            name: NSNotification.Name("AppleColorPreferencesChangedNotification"), object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(systemColorsChanged),
+            name: NSColor.systemColorsDidChangeNotification, object: nil)
+        // An app was uninstalled from the Start menu: its pin is gone, rebuild the button row.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appUninstalled),
+            name: AppUninstaller.didUninstallNotification, object: nil)
+    }
+
+    @objc private func appUninstalled() { rebuildItems() }
+
+    @objc private func interfaceThemeChanged() {
+        // AppleInterfaceStyle is updated slightly after the notification arrives.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.systemColorsChanged() }
+    }
+
+    @objc private func systemColorsChanged() {
+        // Every profile follows the colour mode ("System" tracks macOS) and the accent colour.
+        applyColorModeChange()
     }
 
     @objc private func appsChanged() {
@@ -755,7 +1182,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             guard !want.isEmpty else { self.hotkeyArmed = true; return }
             let have = event.modifierFlags.intersection([.command, .option, .control, .shift, .function])
             if have == want {
-                if self.hotkeyArmed { self.hotkeyArmed = false; self.toggleStart() }
+                if self.hotkeyArmed { self.hotkeyArmed = false; self.toggleStartFromHotkey() }
             } else {
                 self.hotkeyArmed = true
             }
@@ -798,7 +1225,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         let want = NSEvent.ModifierFlags(rawValue: UInt(UserDefaults.standard.integer(forKey: "startHotkeyMods")))
             .intersection([.command, .option, .control, .shift])
         let have = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        if Int(event.keyCode) == kc && have == want { toggleStart() }
+        if Int(event.keyCode) == kc && have == want { toggleStartFromHotkey() }
     }
 
     // Konfigurierbares Startmenü-Tastenkürzel.
@@ -828,23 +1255,42 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
     // MARK: - Full-screen handling
 
-    /// True when the frontmost Space is occupied by a window that covers the whole display
-    /// (native full-screen) — detected via window geometry, no special permission needed.
+    /// True when this taskbar's screen is occupied by a window that covers the whole display
+    /// (native full-screen), detected via window geometry, no special permission needed.
+    /// Per screen: a full-screen app on one monitor only hides that monitor's taskbar.
     private func isFullscreenActive() -> Bool {
         guard let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.main
         else { return false }
-        let sw = primary.frame.width, sh = primary.frame.height
+        // CG window bounds use global top-left coordinates (origin at the primary screen's top-left).
+        let f = screen.frame
+        let sx = f.minX, sy = primary.frame.height - f.maxY, sw = f.width, sh = f.height
 
+        // On displays with a camera notch macOS places full-screen windows below the notch (top =
+        // safe-area inset), so they look like a maximised window. A full-screen Space is then told
+        // apart by the Finder desktop window missing on this display (it is there on every normal
+        // Space, unless the Finder desktop is switched off).
+        let safeTop = screen.safeAreaInsets.top
         let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
+        var belowNotch = false
+        var desktopVisible = false
         for w in list {
             let layer = w[kCGWindowLayer as String] as? Int ?? -1
-            guard layer == 0 else { continue }                       // ordinary app windows only
             guard let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
             let x = b["X"] ?? 0, y = b["Y"] ?? 0
             let ww = b["Width"] ?? 0, hh = b["Height"] ?? 0
-            if x <= 0 && y <= 0 && ww >= sw - 1 && hh >= sh - 1 { return true }
+            let coversScreenBelowTop = x <= sx + 1 && x + ww >= sx + sw - 1 && y + hh >= sy + sh - 1
+            if layer < 0 {
+                // Finder's desktop window (negative desktop level) spanning this display.
+                if (w[kCGWindowOwnerName as String] as? String) == "Finder", coversScreenBelowTop, y <= sy + 1 {
+                    desktopVisible = true
+                }
+                continue
+            }
+            guard layer == 0, coversScreenBelowTop else { continue }   // ordinary app windows only
+            if y <= sy + 1 { return true }                                  // classic full screen
+            if safeTop > 0 && y <= sy + safeTop + 1 { belowNotch = true }   // candidate on notch display
         }
-        return false
+        return belowNotch && !desktopVisible
     }
 
     @objc private func updateBarVisibility() {
@@ -878,8 +1324,17 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     func tearDown() {
         clockTimer?.invalidate()
         clockTimer = nil
+        hotkeyMonitors.forEach { NSEvent.removeMonitor($0) }
+        hotkeyMonitors.removeAll()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
         startMenu.hide()
+        startMenu11.hide()
+        Win11Flyouts.closeAll()
+        preview.scheduleHide()
+        if volumePopover.isShown { volumePopover.close() }
+        Self.registry.removeAll { $0.value == nil || $0.value === self }
         window.orderOut(nil)
     }
 }
@@ -910,33 +1365,33 @@ private final class ClockView: NSView {
             options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
-    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    // Hover-Feld nur, wenn die Uhr anklickbar ist (auf Nebenleisten öffnet sie keinen Kalender).
+    override func mouseEntered(with event: NSEvent) { hovering = onClick != nil; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     func refresh() {
         let now = Date()
+        let format = Theme.clockShowsSeconds ? "HH:mm:ss" : "HH:mm"
+        if timeFormatter.dateFormat != format { timeFormatter.dateFormat = format }
         time = timeFormatter.string(from: now)
         date = dateFormatter.string(from: now)
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering {
-            Theme.accent(brightness: 1.2, alpha: 0.22).setFill()
-            NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 6), xRadius: 4, yRadius: 4).fill()
-        }
+        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 2, dy: 6)) }
         let style = NSMutableParagraphStyle()
         style.alignment = .center
         let timeAttrs: [NSAttributedString.Key: Any] = [
             .font: Theme.font(14, weight: .medium),
-            .foregroundColor: NSColor.white,
+            .foregroundColor: ClassicTray.text,
             .paragraphStyle: style,
         ]
         let dateAttrs: [NSAttributedString.Key: Any] = [
             .font: Theme.font(14, weight: .medium),   // same size as the time
-            .foregroundColor: NSColor(calibratedWhite: 0.92, alpha: 1),
+            .foregroundColor: ClassicTray.pick(NSColor(calibratedWhite: 0.92, alpha: 1), Theme.Aero.text),
             .paragraphStyle: style,
         ]
         let timeStr = NSAttributedString(string: time, attributes: timeAttrs)
@@ -968,16 +1423,25 @@ private final class ShowDesktopButton: NSView {
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func draw(_ dirtyRect: NSRect) {
+        if Theme.isWin11 {
+            // Win11: invisible until hovered, then a faint field with a 1-px line on the left.
+            guard hovering else { return }
+            Theme.Win11.hoverFill.setFill()
+            bounds.fill(using: .sourceOver)
+            Theme.Win11.hairline.setFill()
+            NSRect(x: bounds.minX, y: 0, width: 1, height: bounds.height).fill(using: .sourceOver)
+            return
+        }
         if Theme.taskbarStyle == .win7 {
             let name = hovering ? "desktopPointerOver" : "desktopNormal"
             ThemeAssets.image(name)?.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
             return
         }
         if hovering {
-            NSColor(calibratedWhite: 1, alpha: 0.18).setFill()
+            ClassicTray.pick(NSColor(calibratedWhite: 1, alpha: 0.18), Theme.Aero.hover).setFill()
             bounds.fill()
         }
-        NSColor(calibratedWhite: 1, alpha: 0.35).setStroke()
+        ClassicTray.pick(NSColor(calibratedWhite: 1, alpha: 0.35), Theme.Aero.stroke).setStroke()
         let line = NSBezierPath()
         line.move(to: NSPoint(x: bounds.minX + 0.5, y: 4))
         line.line(to: NSPoint(x: bounds.minX + 0.5, y: bounds.height - 4))
@@ -999,7 +1463,7 @@ private final class BatteryView: NSView {
         let style = NSMutableParagraphStyle(); style.alignment = .center
         let attrs: [NSAttributedString.Key: Any] = [
             .font: Theme.font(12, weight: .medium),
-            .foregroundColor: NSColor.white, .paragraphStyle: style,
+            .foregroundColor: ClassicTray.text, .paragraphStyle: style,
         ]
         let s = NSAttributedString(string: "\(info.percent)%", attributes: attrs)
         s.draw(in: NSRect(x: 0, y: bounds.midY - 16, width: bounds.width, height: 15))
@@ -1008,20 +1472,21 @@ private final class BatteryView: NSView {
         let bodyW: CGFloat = 26, bodyH: CGFloat = 12
         let bx = (bounds.width - bodyW) / 2, by = bounds.midY + 3
         let body = NSRect(x: bx, y: by, width: bodyW, height: bodyH)
-        NSColor(calibratedWhite: 1, alpha: 0.85).setStroke()
+        let outline = ClassicTray.pick(NSColor(calibratedWhite: 1, alpha: 0.85), Theme.Aero.secondaryText)
+        outline.setStroke()
         let bp = NSBezierPath(roundedRect: body, xRadius: 2, yRadius: 2); bp.lineWidth = 1.2; bp.stroke()
         // Cap.
-        NSColor(calibratedWhite: 1, alpha: 0.85).setFill()
+        outline.setFill()
         NSRect(x: body.maxX, y: by + 3, width: 2, height: bodyH - 6).fill()
         // Fill level.
         let level = max(0, min(1, CGFloat(info.percent) / 100))
         let fillColor = info.charging ? NSColor.systemGreen
-            : (info.percent <= 20 ? NSColor.systemRed : Theme.accent(brightness: 1.2))
+            : (info.percent <= 20 ? NSColor.systemRed : ClassicTray.pick(Theme.accent(brightness: 1.2), Theme.Aero.accent))
         fillColor.setFill()
         NSRect(x: bx + 2, y: by + 2, width: (bodyW - 4) * level, height: bodyH - 4).fill()
         if info.charging {
             let bolt = NSAttributedString(string: "⚡︎", attributes: [
-                .font: Theme.font(9), .foregroundColor: NSColor.white])
+                .font: Theme.font(9), .foregroundColor: ClassicTray.text])
             bolt.draw(at: NSPoint(x: bx + bodyW / 2 - 4, y: by + 1))
         }
     }
@@ -1047,19 +1512,11 @@ private final class TrayIconButton: NSView {
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering {
-            Theme.accent(brightness: 1.2, alpha: 0.22).setFill()
-            NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 8), xRadius: 4, yRadius: 4).fill()
-        }
+        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
         let cfg = NSImage.SymbolConfiguration(pointSize: 16 * Theme.scale, weight: .regular)
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg) {
-            let tinted = NSImage(size: img.size, flipped: false) { rect in
-                img.draw(in: rect)
-                NSColor.white.set()
-                rect.fill(using: .sourceAtop)
-                return true
-            }
+            let tinted = ClassicTray.tinted(img, ClassicTray.text)
             let s = tinted.size
             tinted.draw(in: NSRect(x: (bounds.width - s.width) / 2,
                                    y: (bounds.height - s.height) / 2, width: s.width, height: s.height))
