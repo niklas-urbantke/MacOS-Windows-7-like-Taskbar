@@ -51,6 +51,9 @@ if [ -d "MediaRemoteHelper" ]; then
     fi
 fi
 
+# Build-Commit einbacken, damit die App ihren eigenen Stand kennt (für das Self-Update).
+GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+
 cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -70,6 +73,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <string>Zeigt deine Termine im Kalender der Taskleiste an (nur lesend).</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Steuert Musik-Player, Finder, Energie-Aktionen und die DockDoor-Fenstervorschau.</string>
+    <key>GitCommit</key>               <string>$GIT_COMMIT</string>
 </dict>
 </plist>
 PLIST

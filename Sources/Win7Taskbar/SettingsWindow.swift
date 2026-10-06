@@ -34,6 +34,16 @@ final class SettingsWindowController: NSObject {
     // Finder-Symbol (nur für diese Taskleiste).
     private let finderIconStatus = NSTextField(labelWithString: "")
 
+    // App-Update (Self-Update aus der Quelle).
+    private let updInfoLabel = NSTextField(labelWithString: "")
+    private let updState = NSTextField(labelWithString: "")
+    private let updVersionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let updDevBox = NSButton(checkboxWithTitle: "Auch Entwicklerversionen (Branches) anzeigen", target: nil, action: nil)
+    private let updAutoBox = NSButton(checkboxWithTitle: "Beim Start automatisch nach Updates suchen", target: nil, action: nil)
+    private let updCheckButton = NSButton(title: "Nach Updates suchen", target: nil, action: nil)
+    private let updRunButton = NSButton(title: "Jetzt aktualisieren", target: nil, action: nil)
+    private var updTargets: [(label: String, target: UpdateManager.Target)] = []
+
     // Taskleisten-Stil-Profil.
     private let taskbarStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let taskbarStyles: [(label: String, value: String)] = [("Windows Vista", "vista"), ("Windows 7", "win7"), ("Windows 11", "win11")]
@@ -272,9 +282,26 @@ final class SettingsWindowController: NSObject {
         tabView.translatesAutoresizingMaskIntoConstraints = false
         let dockPinsButton = NSButton(title: "Angeheftete Dock-Apps übernehmen", target: self, action: #selector(importDockPins))
         dockPinsButton.bezelStyle = .rounded
-        let updateButton = NSButton(title: "Taskleiste aktualisieren (git) …", target: self, action: #selector(runUpdate))
-        updateButton.bezelStyle = .rounded
-        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox, allScreensBox, hotkeyRow, dockPinsButton, updateButton]))
+        // App-Update section (self-update by building from source, with live progress).
+        let updHeader = NSTextField(labelWithString: "App-Update")
+        updHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        updInfoLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        updInfoLabel.textColor = .secondaryLabelColor
+        updVersionPopup.target = self
+        updVersionPopup.action = #selector(updVersionChanged)
+        let updVersionRow = NSStackView(views: [NSTextField(labelWithString: "Zielversion:"), updVersionPopup])
+        updVersionRow.orientation = .horizontal; updVersionRow.spacing = 8
+        updDevBox.target = self; updDevBox.action = #selector(updDevToggled)
+        updCheckButton.bezelStyle = .rounded; updCheckButton.target = self; updCheckButton.action = #selector(updCheck)
+        updRunButton.bezelStyle = .rounded; updRunButton.target = self; updRunButton.action = #selector(updRun)
+        updRunButton.isEnabled = false
+        updState.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let updButtonsRow = NSStackView(views: [updCheckButton, updRunButton, updState])
+        updButtonsRow.orientation = .horizontal; updButtonsRow.spacing = 8
+        updAutoBox.target = self; updAutoBox.action = #selector(updAutoToggled)
+
+        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox, allScreensBox, hotkeyRow, dockPinsButton,
+                                                     updHeader, updInfoLabel, updVersionRow, updDevBox, updButtonsRow, updAutoBox]))
         previewPopup.removeAllItems()
         previewPopup.addItems(withTitles: previewModes.map { $0.label })
         previewPopup.target = self
@@ -431,6 +458,14 @@ final class SettingsWindowController: NSObject {
         allScreensBox.state = c.showOnAllScreens ? .on : .off
         hotkeyButton.title = c.startHotkeyLabel
         updateFinderIconStatus()
+
+        let info = UpdateManager.currentInfo()
+        updInfoLabel.stringValue = info.isDev
+            ? "Installiert: \(info.version) (Dev – kein Build-Commit)"
+            : "Installiert: \(info.version) (\(info.shortCommit ?? "?"))"
+        updAutoBox.state = (UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true) ? .on : .off
+        updDevBox.state = UserDefaults.standard.bool(forKey: "updShowDev") ? .on : .off
+        if updTargets.isEmpty { populateUpdateVersions() }
         finderDesktopBox.state = c.hideFinderDesktopEnabled ? .on : .off
         fullHeightBox.state = c.fullHeightIcons ? .on : .off
         if let idx = orbs.firstIndex(where: { $0.file == c.selectedOrbFile }) {
@@ -783,7 +818,74 @@ final class SettingsWindowController: NSObject {
         }
     }
 
-    @objc private func runUpdate() { UpdateManager.runUpdate() }
+    // MARK: - App-Update
+
+    private func selectedTarget() -> UpdateManager.Target? {
+        let i = updVersionPopup.indexOfSelectedItem
+        guard i >= 0, i < updTargets.count else { return nil }
+        return updTargets[i].target
+    }
+
+    @objc private func updVersionChanged() { updRunButton.isEnabled = false; updState.stringValue = "" }
+    @objc private func updDevToggled() {
+        UserDefaults.standard.set(updDevBox.state == .on, forKey: "updShowDev")
+        populateUpdateVersions()
+    }
+    @objc private func updAutoToggled() {
+        UserDefaults.standard.set(updAutoBox.state == .on, forKey: "autoCheckUpdates")
+    }
+
+    @objc private func updCheck() {
+        guard let t = selectedTarget() else { return }
+        updState.stringValue = "Prüfe …"; updState.textColor = .secondaryLabelColor
+        updCheckButton.isEnabled = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = UpdateManager.checkForUpdate(t)
+            DispatchQueue.main.async {
+                self.updCheckButton.isEnabled = true
+                self.updRunButton.isEnabled = r.updateAvailable
+                if r.updateAvailable {
+                    self.updState.stringValue = "Update verfügbar (" + (r.remoteCommit.map { String($0.prefix(8)) } ?? "?") + ")"
+                    self.updState.textColor = .systemGreen
+                } else {
+                    self.updState.stringValue = r.reason ?? "Aktuell."
+                    self.updState.textColor = .secondaryLabelColor
+                }
+            }
+        }
+    }
+
+    @objc private func updRun() {
+        guard let t = selectedTarget() else { return }
+        UpdateManager.runUpdate(t)
+    }
+
+    private func populateUpdateVersions() {
+        updVersionPopup.removeAllItems()
+        updVersionPopup.addItem(withTitle: "Lade …")
+        updTargets = []
+        let showDev = updDevBox.state == .on
+        DispatchQueue.global(qos: .userInitiated).async {
+            let refs = UpdateManager.listRefs()
+            var items: [(String, UpdateManager.Target)] = []
+            for tag in UpdateManager.sortedReleaseTags(refs.tags) {
+                items.append(("Version \(tag)", UpdateManager.Target(kind: .tag, ref: tag)))
+            }
+            if showDev {
+                let branches = refs.branches.sorted { ($0 == "main" ? "" : $0) < ($1 == "main" ? "" : $1) }
+                for b in branches { items.append(("Branch: \(b)", UpdateManager.Target(kind: .branch, ref: b))) }
+                let otherTags = refs.tags.filter { !UpdateManager.isReleaseTag($0) }
+                for tg in otherTags { items.append(("Tag: \(tg)", UpdateManager.Target(kind: .tag, ref: tg))) }
+            }
+            if items.isEmpty { items.append(("Branch: main", UpdateManager.Target(kind: .branch, ref: "main"))) }
+            DispatchQueue.main.async {
+                self.updTargets = items
+                self.updVersionPopup.removeAllItems()
+                self.updVersionPopup.addItems(withTitles: items.map { $0.0 })
+                self.updVersionPopup.selectItem(at: 0)
+            }
+        }
+    }
 
     @objc private func quitAction() { NSApp.terminate(nil) }
 }

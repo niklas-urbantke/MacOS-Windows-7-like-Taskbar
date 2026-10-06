@@ -125,6 +125,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
                 Self.didImportDockPins = true
                 PinStore.importDockPins(includeReleased: false)
             }
+            autoCheckUpdatesIfEnabled()
         }
         rebuildItems()
         startClock()
@@ -150,6 +151,25 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         let nc = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification] {
             nc.addObserver(self, selector: #selector(recordRecent(_:)), name: name, object: nil)
+        }
+    }
+
+    /// On start (if enabled), check for a newer version in the background and offer to update.
+    private func autoCheckUpdatesIfEnabled() {
+        guard UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true else { return }
+        guard !UpdateManager.currentInfo().isDev else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let r = UpdateManager.checkForUpdate(nil)
+            guard r.updateAvailable else { return }
+            DispatchQueue.main.async {
+                let a = NSAlert()
+                a.messageText = "Update verfügbar"
+                a.informativeText = "Eine neuere Version der Taskleiste ist verfügbar (\(r.target.ref)). "
+                    + "Jetzt aus der Quelle neu bauen und aktualisieren? Erteilte Berechtigungen bleiben erhalten."
+                a.addButton(withTitle: "Jetzt aktualisieren")
+                a.addButton(withTitle: "Später")
+                if a.runModal() == .alertFirstButtonReturn { UpdateManager.runUpdate(r.target) }
+            }
         }
     }
 
