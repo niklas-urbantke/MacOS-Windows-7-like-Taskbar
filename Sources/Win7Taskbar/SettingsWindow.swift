@@ -272,7 +272,9 @@ final class SettingsWindowController: NSObject {
         tabView.translatesAutoresizingMaskIntoConstraints = false
         let dockPinsButton = NSButton(title: "Angeheftete Dock-Apps übernehmen", target: self, action: #selector(importDockPins))
         dockPinsButton.bezelStyle = .rounded
-        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox, allScreensBox, hotkeyRow, dockPinsButton]))
+        let updateButton = NSButton(title: "Taskleiste aktualisieren (git) …", target: self, action: #selector(runUpdate))
+        updateButton.bezelStyle = .rounded
+        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox, allScreensBox, hotkeyRow, dockPinsButton, updateButton]))
         previewPopup.removeAllItems()
         previewPopup.addItems(withTitles: previewModes.map { $0.label })
         previewPopup.target = self
@@ -780,6 +782,8 @@ final class SettingsWindowController: NSObject {
             break
         }
     }
+
+    @objc private func runUpdate() { UpdateManager.runUpdate() }
 
     @objc private func quitAction() { NSApp.terminate(nil) }
 }
