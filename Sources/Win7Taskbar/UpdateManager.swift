@@ -284,12 +284,26 @@ final class UpdateProgressWindow {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
+        scroll.drawsBackground = true
+        scroll.backgroundColor = NSColor(calibratedWhite: 0.10, alpha: 1)
         scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.appearance = NSAppearance(named: .darkAqua)
+
+        textView.frame = NSRect(x: 0, y: 0, width: 592, height: 360)
         textView.isEditable = false
+        textView.isSelectable = true
         textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        textView.textColor = .labelColor
+        textView.textColor = Self.logColor
         textView.drawsBackground = true
-        textView.backgroundColor = NSColor(calibratedWhite: 0.08, alpha: 1)
+        textView.backgroundColor = NSColor(calibratedWhite: 0.10, alpha: 1)
+        textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 592, height: CGFloat.greatestFiniteMagnitude)
         scroll.documentView = textView
 
         spinner.style = .spinning
@@ -326,8 +340,15 @@ final class UpdateProgressWindow {
         window.makeKeyAndOrderFront(nil)
     }
 
+    static let logColor = NSColor(calibratedWhite: 0.92, alpha: 1)
+
     func append(_ line: String) {
-        textView.string += (textView.string.isEmpty ? "" : "\n") + line
+        let text = (textView.string.isEmpty ? "" : "\n") + line
+        let attr = NSAttributedString(string: text, attributes: [
+            .foregroundColor: Self.logColor,
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+        ])
+        textView.textStorage?.append(attr)
         textView.scrollToEndOfDocument(nil)
     }
 
