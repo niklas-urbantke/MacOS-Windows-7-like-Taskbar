@@ -62,8 +62,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key>            <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>     <string>Windows 7 Taskleiste</string>
     <key>CFBundleIdentifier</key>      <string>de.batix.win7taskbar</string>
-    <key>CFBundleVersion</key>         <string>3.0.0</string>
-    <key>CFBundleShortVersionString</key><string>3.0.0</string>
+    <key>CFBundleVersion</key>         <string>4.0.0</string>
+    <key>CFBundleShortVersionString</key><string>4.0.0</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleExecutable</key>      <string>$APP_NAME</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
