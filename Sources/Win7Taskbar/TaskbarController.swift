@@ -419,7 +419,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         // Vista/Win7: the orb sits fixed at the left edge.
         orb.frame = NSRect(x: 0, y: 0, width: Theme.orbWidth, height: Theme.barHeight)
 
-        let startX = Theme.orbWidth + 4   // Abstand zwischen Orb und erstem Icon
+        let startX = Theme.orbWidth + Theme.orbGap   // Abstand zwischen Orb und erstem Icon
         let endX = trayLeftX - 6
         let available = max(0, endX - startX)
         guard !items.isEmpty, available > 0 else { return }
@@ -867,6 +867,14 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     var defaultIconWidth: CGFloat { Theme.defaultIconWidth }
     func setIconWidth(_ v: CGFloat) {
         UserDefaults.standard.set(Double(v), forKey: "iconWidth")
+        Self.forAll { $0.applyBarHeight() }
+    }
+
+    // Abstand zwischen Orb und erstem Icon (px, Standard 20).
+    var orbGapValue: CGFloat { Theme.orbGapValue }
+    var defaultOrbGap: CGFloat { Theme.defaultOrbGap }
+    func setOrbGap(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "orbGap")
         Self.forAll { $0.applyBarHeight() }
     }
 

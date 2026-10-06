@@ -29,6 +29,14 @@ enum Theme {
         return CGFloat(min(160, max(36, v)))
     }
     static var buttonWidth: CGFloat { s(iconWidthValue) }
+
+    // Configurable gap between the Start orb and the first icon (px, scaled). Default 20.
+    static let defaultOrbGap: CGFloat = 20
+    static var orbGapValue: CGFloat {
+        let v = UserDefaults.standard.object(forKey: "orbGap") as? Double ?? Double(defaultOrbGap)
+        return CGFloat(min(120, max(0, v)))
+    }
+    static var orbGap: CGFloat { s(orbGapValue) }
     static var buttonHeight: CGFloat { s(56) }
     static var buttonSpacing: CGFloat { s(2) }
     static var iconSize: CGFloat { s(56) }
