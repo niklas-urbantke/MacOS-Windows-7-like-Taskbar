@@ -143,6 +143,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
                         name: NSNotification.Name("de.batix.win7taskbar.openSettings"), object: nil)
         dnc.addObserver(self, selector: #selector(openMenuEditorNotif),
                         name: NSNotification.Name("de.batix.win7taskbar.openEditor"), object: nil)
+        dnc.addObserver(forName: NSNotification.Name("de.batix.win7taskbar.dumpWindows"),
+                        object: nil, queue: .main) { _ in WindowPreview.dumpDiagnostics() }
 
         // Record recently opened apps for the Start menu.
         let nc = NSWorkspace.shared.notificationCenter

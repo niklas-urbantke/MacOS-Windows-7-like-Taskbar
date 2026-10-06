@@ -65,7 +65,11 @@ enum WindowPreview {
         guard AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &value) == .success,
               let wins = value as? [AXUIElement] else { return [] }
 
-        var result = wins.prefix(10).map { win -> AXWin in
+        var result = wins.prefix(20).compactMap { win -> AXWin? in
+            // Only count real, user-facing windows. Apps like "new Outlook" (WebView) spawn many
+            // phantom windows — 0×0, thin helper strips, off-screen reminder toasts — which must not
+            // inflate the taskbar count or appear in previews.
+            guard isRealWindow(win) else { return nil }
             var titleRef: CFTypeRef?
             AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &titleRef)
             var minRef: CFTypeRef?
@@ -82,6 +86,25 @@ enum WindowPreview {
             result = result.filter { !$0.title.trimmingCharacters(in: .whitespaces).isEmpty }
         }
         return result
+    }
+
+    /// Whether an AX window is a real, user-facing window (not a 0×0 helper, thin strip, dialog or
+    /// reminder toast). Keeps standard windows and windows without a declared subrole (size-gated),
+    /// and drops explicitly non-standard ones (AXDialog, AXFloatingWindow, system dialogs, …).
+    private static func isRealWindow(_ win: AXUIElement) -> Bool {
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(win, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let s = sizeRef else { return false }
+        var size = CGSize.zero
+        AXValueGetValue(s as! AXValue, .cgSize, &size)
+        if size.width < 120 || size.height < 80 { return false }   // 0×0 helpers, thin strips
+
+        var srRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(win, kAXSubroleAttribute as CFString, &srRef)
+        let subrole = (srRef as? String) ?? ""
+        if subrole == (kAXStandardWindowSubrole as String) { return true }
+        if subrole.isEmpty { return true }                          // apps that don't set a subrole
+        return false                                                // dialogs, floating toasts, etc.
     }
 
     // MARK: - ScreenCaptureKit
@@ -164,6 +187,39 @@ enum WindowPreview {
         guard AXIsProcessTrusted() else { return (1, 0) }
         let wins = axWindows(pid: pid)
         return (wins.filter { !$0.minimized }.count, wins.filter { $0.minimized }.count)
+    }
+
+    /// Diagnostic: log every AX window of every regular app with its attributes (to /tmp log).
+    static func dumpDiagnostics() {
+        guard AXIsProcessTrusted() else { DebugLog.log("dump: AX not trusted"); return }
+        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+            let appEl = AXUIElementCreateApplication(app.processIdentifier)
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &value) == .success,
+                  let wins = value as? [AXUIElement] else { continue }
+            DebugLog.log("=== \(app.localizedName ?? "?") [\(app.bundleIdentifier ?? "")] windows=\(wins.count) ===")
+            for (i, win) in wins.enumerated() {
+                func str(_ a: String) -> String {
+                    var r: CFTypeRef?; AXUIElementCopyAttributeValue(win, a as CFString, &r); return (r as? String) ?? ""
+                }
+                func boolA(_ a: String) -> Bool {
+                    var r: CFTypeRef?; AXUIElementCopyAttributeValue(win, a as CFString, &r); return (r as? Bool) ?? false
+                }
+                var size = CGSize.zero, pos = CGPoint.zero
+                var sr: CFTypeRef?
+                if AXUIElementCopyAttributeValue(win, kAXSizeAttribute as CFString, &sr) == .success, let s = sr {
+                    AXValueGetValue(s as! AXValue, .cgSize, &size)
+                }
+                var pr: CFTypeRef?
+                if AXUIElementCopyAttributeValue(win, kAXPositionAttribute as CFString, &pr) == .success, let p = pr {
+                    AXValueGetValue(p as! AXValue, .cgPoint, &pos)
+                }
+                var cb: CFTypeRef?
+                let hasClose = AXUIElementCopyAttributeValue(win, kAXCloseButtonAttribute as CFString, &cb) == .success && cb != nil
+                DebugLog.log("  [\(i)] role=\(str(kAXRoleAttribute)) subrole=\(str(kAXSubroleAttribute)) min=\(boolA(kAXMinimizedAttribute)) close=\(hasClose) size=\(Int(size.width))x\(Int(size.height)) pos=\(Int(pos.x)),\(Int(pos.y)) title=\"\(str(kAXTitleAttribute))\"")
+            }
+        }
+        DebugLog.log("=== dump end ===")
     }
 
     static func unminimizeAndRaise(pid: pid_t) {
