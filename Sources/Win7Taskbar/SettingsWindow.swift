@@ -23,6 +23,8 @@ final class SettingsWindowController: NSObject {
     private let menuStyles: [(label: String, value: String)] = [("Akzentfarbe", "accent"), ("Taskbar (Aero)", "aero")]
     private let heightSlider = NSSlider(frame: .zero)
     private let heightLabel = NSTextField(labelWithString: "")
+    private let iconWidthSlider = NSSlider(frame: .zero)
+    private let iconWidthLabel = NSTextField(labelWithString: "")
 
     // Startmenü-Tastenkürzel-Rekorder.
     private let hotkeyButton = HotkeyRecorderButton(title: "—", target: nil, action: nil)
@@ -124,6 +126,16 @@ final class SettingsWindowController: NSObject {
         let heightRow = NSStackView(views: [NSTextField(labelWithString: "Leistenhöhe:"), heightSlider, heightLabel, dockSizeButton])
         heightRow.orientation = .horizontal
         heightRow.spacing = 8
+
+        // Icon frame width (px).
+        iconWidthSlider.isContinuous = true
+        iconWidthSlider.target = self
+        iconWidthSlider.action = #selector(iconWidthChanged)
+        iconWidthSlider.translatesAutoresizingMaskIntoConstraints = false
+        iconWidthSlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        let iconWidthRow = NSStackView(views: [NSTextField(labelWithString: "Icon-Rahmenbreite:"), iconWidthSlider, iconWidthLabel])
+        iconWidthRow.orientation = .horizontal
+        iconWidthRow.spacing = 8
 
         // Taskleisten-Stil-Profil.
         taskbarStylePopup.removeAllItems()
@@ -259,7 +271,7 @@ final class SettingsWindowController: NSObject {
         let previewRow = NSStackView(views: [NSTextField(labelWithString: "Fenstervorschau:"), previewPopup, previewHint])
         previewRow.orientation = .horizontal
         previewRow.spacing = 8
-        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, appearanceRow, previewRow, orbRow, styleRow, heightRow, fullHeightBox,
+        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, appearanceRow, previewRow, orbRow, styleRow, heightRow, iconWidthRow, fullHeightBox,
                                                        win11Header, win11Row, acrylicGrid, resetAcrylic]))
         tabView.addTabViewItem(makeTab("Transparenz",
                                        [tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
@@ -417,6 +429,10 @@ final class SettingsWindowController: NSObject {
         heightSlider.maxValue = Double(c.maxBarHeight)
         heightSlider.doubleValue = Double(c.barHeightValue)
         heightLabel.stringValue = "\(Int(c.barHeightValue)) px"
+        iconWidthSlider.minValue = 36
+        iconWidthSlider.maxValue = 160
+        iconWidthSlider.doubleValue = Double(c.iconWidthValue)
+        iconWidthLabel.stringValue = "\(Int(c.iconWidthValue)) px"
 
         if let idx = taskbarStyles.firstIndex(where: { $0.value == c.taskbarStyle }) {
             taskbarStylePopup.selectItem(at: idx)
@@ -570,6 +586,13 @@ final class SettingsWindowController: NSObject {
         heightLabel.stringValue = "\(Int(v)) px"
         guard sliderReleased else { return }
         controller?.setBarHeight(CGFloat(v))
+    }
+
+    @objc private func iconWidthChanged() {
+        let v = iconWidthSlider.doubleValue.rounded()
+        iconWidthLabel.stringValue = "\(Int(v)) px"
+        guard sliderReleased else { return }
+        controller?.setIconWidth(CGFloat(v))
     }
 
     @objc private func orbChanged() {

@@ -862,6 +862,14 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         layoutTray()   // repositions tray, start button + buttons at the new scale
     }
 
+    // Icon-Rahmenbreite (px, Standard 60).
+    var iconWidthValue: CGFloat { Theme.iconWidthValue }
+    var defaultIconWidth: CGFloat { Theme.defaultIconWidth }
+    func setIconWidth(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "iconWidth")
+        Self.forAll { $0.applyBarHeight() }
+    }
+
     // Icon-Rahmen über volle Höhe.
     var fullHeightIcons: Bool { UserDefaults.standard.bool(forKey: "fullHeightIcons") }
     func setFullHeightIcons(_ on: Bool) {

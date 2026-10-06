@@ -21,7 +21,14 @@ enum Theme {
 
     // Bar metrics (base values at the reference height), scaled.
     static var orbWidth: CGFloat { s(72) }
-    static var buttonWidth: CGFloat { s(100) }
+
+    // Configurable icon-frame width (px at the reference height, then scaled). Default 60.
+    static let defaultIconWidth: CGFloat = 60
+    static var iconWidthValue: CGFloat {
+        let v = UserDefaults.standard.object(forKey: "iconWidth") as? Double ?? Double(defaultIconWidth)
+        return CGFloat(min(160, max(36, v)))
+    }
+    static var buttonWidth: CGFloat { s(iconWidthValue) }
     static var buttonHeight: CGFloat { s(56) }
     static var buttonSpacing: CGFloat { s(2) }
     static var iconSize: CGFloat { s(56) }
