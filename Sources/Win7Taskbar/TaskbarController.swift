@@ -58,6 +58,9 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private var hotkeyMonitors: [Any] = []
     private var hotkeyArmed = true
     private var tick = 0
+    /// True while a DockDoor preview was requested and may still be on screen (for the watchdog
+    /// that closes previews DockDoor fails to hide on its own).
+    private static var ddPreviewShown = false
 
     // Button layout geometry + drag state.
     private var buttonStartX: CGFloat = 0
@@ -662,6 +665,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             // preview shows the app's real windows instead.
             DockDoorBridge.show(bundleID: bundleID, anchor: column, screen: screen,
                                 mediaFallback: showBuiltin)
+            Self.ddPreviewShown = true
         case .off:
             break
         }
@@ -685,6 +689,48 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private func hidePreviews() {
         preview.scheduleHide()
         if Theme.previewMode == .dockdoor { DockDoorBridge.hide() }
+        Self.ddPreviewShown = false
+    }
+
+    /// Safety net for stuck hover previews. The built-in preview hides via a tracking-area exit, which
+    /// macOS occasionally misses (fast move, leaving downward onto the bar, Space switch) so the panel
+    /// stays open until restart. Once per tick: if a preview is on screen while the mouse is neither
+    /// over this bar nor over the preview, force-hide it. Runs on every taskbar (its own preview),
+    /// plus a DockDoor net on the primary bar.
+    private func previewWatchdog() {
+        let mouse = NSEvent.mouseLocation
+        let overThisBar = window.frame.insetBy(dx: -8, dy: -8).contains(mouse)
+
+        // Built-in preview belonging to this taskbar.
+        if preview.isVisible {
+            let overPanel = preview.panelFrame.insetBy(dx: -16, dy: -16).contains(mouse)
+            if !overThisBar && !overPanel { preview.scheduleHide() }
+        }
+
+        // DockDoor net (primary only): close a preview DockDoor failed to hide itself.
+        guard isPrimary, Theme.previewMode == .dockdoor, Self.ddPreviewShown else { return }
+        let ddPids = NSRunningApplication.runningApplications(withBundleIdentifier: Theme.dockDoorBundleID)
+            .map { $0.processIdentifier }
+        guard !ddPids.isEmpty else { Self.ddPreviewShown = false; return }
+        let primaryH = (NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main ?? screen).frame.height
+        let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
+        var rects: [NSRect] = []
+        for w in list {
+            guard let pid = w[kCGWindowOwnerPID as String] as? pid_t, ddPids.contains(pid),
+                  let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+            let ww = b["Width"] ?? 0, hh = b["Height"] ?? 0
+            guard ww >= 40, hh >= 40 else { continue }
+            rects.append(NSRect(x: b["X"] ?? 0, y: primaryH - (b["Y"] ?? 0) - hh, width: ww, height: hh))
+        }
+        let overAnyBar = Self.allControllers.contains { $0.window.frame.insetBy(dx: -10, dy: -10).contains(mouse) }
+        if rects.isEmpty {
+            if !overAnyBar { Self.ddPreviewShown = false }
+            return
+        }
+        if overAnyBar { return }
+        if rects.contains(where: { $0.insetBy(dx: -16, dy: -16).contains(mouse) }) { return }
+        DockDoorBridge.hide()
+        Self.ddPreviewShown = false
     }
 
     // MARK: - Drag reordering
@@ -1118,6 +1164,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             guard let self else { return }
             self.updateBarVisibility()
             self.tick += 1
+            self.previewWatchdog()
             // Window counts / badges: counted once (primary) and applied to every taskbar.
             if self.isPrimary && self.tick % 2 == 0 { self.updateWindowCounts(allBars: true) }
             if Theme.isWin11 {

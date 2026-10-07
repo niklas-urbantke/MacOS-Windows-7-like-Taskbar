@@ -46,6 +46,11 @@ final class WindowPreviewController {
         panel.contentView = content
     }
 
+    /// Whether the preview panel is currently on screen (for the stuck-preview watchdog).
+    var isVisible: Bool { panel.isVisible }
+    /// The panel's screen frame (for the watchdog's mouse-containment check).
+    var panelFrame: NSRect { panel.frame }
+
     // MARK: - Show / hide
 
     func show(pid: pid_t, appName: String, icon: NSImage?, anchorRect: NSRect, screen: NSScreen,
