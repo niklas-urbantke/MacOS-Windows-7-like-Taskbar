@@ -62,6 +62,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     /// that closes previews DockDoor fails to hide on its own).
     private static var ddPreviewShown = false
 
+    // Auto-hide (bar slides off the bottom edge and reveals when the mouse hits the edge).
+    private var autoHideTimer: Timer?
+    private var autoHideShown = true
+    private var autoHideLastNeed = Date()
+
     // Button layout geometry + drag state.
     private var buttonStartX: CGFloat = 0
     private var buttonPitch: CGFloat = 0
@@ -132,6 +137,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         }
         rebuildItems()
         startClock()
+        applyAutoHide()
 
         window.orderFront(nil)
     }
@@ -798,6 +804,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
     /// Opens / closes the Start menu of THIS taskbar, on its own screen.
     @objc private func toggleStart() {
+        // With auto-hide, reveal the bar first so the orb (and thus the menu anchor) is on screen.
+        if autoHideEnabled && !autoHideShown { setBarSlide(shown: true, animated: false) }
         let orbScreenRect = NSRect(x: window.frame.minX + orb.frame.minX,
                                    y: window.frame.minY + orb.frame.minY,
                                    width: orb.frame.width, height: orb.frame.height)
@@ -926,6 +934,66 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
                        width: screen.frame.width, height: Theme.barHeight)
         window.setFrame(f, display: true)
         layoutTray()   // repositions tray, start button + buttons at the new scale
+        if autoHideEnabled && !autoHideShown { setBarSlide(shown: false, animated: false) }
+    }
+
+    // MARK: - Auto-hide
+
+    var autoHideEnabled: Bool { UserDefaults.standard.bool(forKey: "autoHide") }
+    func setAutoHide(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "autoHide")
+        Self.forAll { $0.applyAutoHide() }
+    }
+
+    private func applyAutoHide() {
+        if autoHideEnabled {
+            _ = setReserveEnabled(false)   // auto-hide overlaps content; a reserved gap would conflict
+            startAutoHideTimer()
+        } else {
+            stopAutoHideTimer()
+            setBarSlide(shown: true, animated: true)
+        }
+    }
+
+    private func startAutoHideTimer() {
+        guard autoHideTimer == nil else { return }
+        autoHideLastNeed = Date()
+        let t = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in self?.autoHideTick() }
+        RunLoop.main.add(t, forMode: .common)
+        autoHideTimer = t
+    }
+    private func stopAutoHideTimer() { autoHideTimer?.invalidate(); autoHideTimer = nil }
+
+    private func autoHideTick() {
+        guard autoHideEnabled else { stopAutoHideTimer(); return }
+        let mouse = NSEvent.mouseLocation
+        let sf = screen.frame
+        let atEdge = mouse.y <= sf.minY + 2 && mouse.x >= sf.minX && mouse.x <= sf.maxX
+        let overBar = autoHideShown && window.frame.contains(mouse)
+        let busy = orb.menuOpen || preview.isVisible   // keep revealed while menu/preview is open
+        if atEdge || overBar || busy {
+            autoHideLastNeed = Date()
+            if !autoHideShown { setBarSlide(shown: true, animated: true) }
+        } else if autoHideShown, Date().timeIntervalSince(autoHideLastNeed) > 0.5 {
+            setBarSlide(shown: false, animated: true)
+        }
+    }
+
+    /// Slide the bar in (shown) or off the bottom edge (hidden).
+    private func setBarSlide(shown: Bool, animated: Bool) {
+        autoHideShown = shown
+        let sf = screen.frame
+        let f = NSRect(x: sf.minX, y: shown ? sf.minY : sf.minY - Theme.barHeight,
+                       width: sf.width, height: Theme.barHeight)
+        if animated {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.16
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                window.animator().setFrame(f, display: true)
+            }
+        } else {
+            window.setFrame(f, display: true)
+        }
     }
 
     // Icon-Rahmenbreite (px, Standard 60).

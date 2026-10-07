@@ -15,6 +15,7 @@ final class SettingsWindowController: NSObject {
     private let autostartBox = NSButton(checkboxWithTitle: "Beim Anmelden automatisch starten", target: nil, action: nil)
     private let secondsBox = NSButton(checkboxWithTitle: "Uhr mit Sekunden", target: nil, action: nil)
     private let allScreensBox = NSButton(checkboxWithTitle: "Taskleiste auf allen Bildschirmen (Nebenbildschirme ohne Medien und Leistung)", target: nil, action: nil)
+    private let autoHideBox = NSButton(checkboxWithTitle: "Taskleiste automatisch ausblenden (am unteren Rand einblenden)", target: nil, action: nil)
     private let finderDesktopBox = NSButton(checkboxWithTitle: "Finder-Desktopfenster nicht als Fenster zählen", target: nil, action: nil)
     private let fullHeightBox = NSButton(checkboxWithTitle: "Icon-Rahmen über volle Höhe", target: nil, action: nil)
     private let orbPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -239,7 +240,7 @@ final class SettingsWindowController: NSObject {
         menuHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
 
         for box in [dockBox, reserveBox, finderBox, finderDesktopBox, nowPlayingBox,
-                    wifiBox, monitorBox, autostartBox, fullHeightBox, secondsBox, allScreensBox] {
+                    wifiBox, monitorBox, autostartBox, fullHeightBox, secondsBox, allScreensBox, autoHideBox] {
             box.target = self
             box.action = #selector(changed(_:))
         }
@@ -282,6 +283,12 @@ final class SettingsWindowController: NSObject {
         tabView.translatesAutoresizingMaskIntoConstraints = false
         let dockPinsButton = NSButton(title: "Angeheftete Dock-Apps übernehmen", target: self, action: #selector(importDockPins))
         dockPinsButton.bezelStyle = .rounded
+        let exportButton = NSButton(title: "Einstellungen exportieren…", target: self, action: #selector(exportSettings))
+        exportButton.bezelStyle = .rounded
+        let importButton = NSButton(title: "Einstellungen importieren…", target: self, action: #selector(importSettings))
+        importButton.bezelStyle = .rounded
+        let backupRow = NSStackView(views: [exportButton, importButton])
+        backupRow.orientation = .horizontal; backupRow.spacing = 8
         // App-Update section (self-update by building from source, with live progress).
         let updHeader = NSTextField(labelWithString: "App-Update")
         updHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
@@ -300,7 +307,7 @@ final class SettingsWindowController: NSObject {
         updButtonsRow.orientation = .horizontal; updButtonsRow.spacing = 8
         updAutoBox.target = self; updAutoBox.action = #selector(updAutoToggled)
 
-        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autostartBox, allScreensBox, hotkeyRow, dockPinsButton,
+        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autoHideBox, autostartBox, allScreensBox, hotkeyRow, dockPinsButton, backupRow,
                                                      updHeader, updInfoLabel, updVersionRow, updDevBox, updButtonsRow, updAutoBox]))
         previewPopup.removeAllItems()
         previewPopup.addItems(withTitles: previewModes.map { $0.label })
@@ -456,6 +463,7 @@ final class SettingsWindowController: NSObject {
         previewPopup.item(at: 0)?.isEnabled = Theme.isDockDoorInstalled
         previewPopup.autoenablesItems = false
         allScreensBox.state = c.showOnAllScreens ? .on : .off
+        autoHideBox.state = c.autoHideEnabled ? .on : .off
         hotkeyButton.title = c.startHotkeyLabel
         updateFinderIconStatus()
 
@@ -813,6 +821,8 @@ final class SettingsWindowController: NSObject {
             c.setClockSeconds(on)
         case allScreensBox:
             c.setShowOnAllScreens(on)
+        case autoHideBox:
+            c.setAutoHide(on)
         default:
             break
         }
@@ -885,6 +895,49 @@ final class SettingsWindowController: NSObject {
                 self.updVersionPopup.selectItem(at: 0)
             }
         }
+    }
+
+    // MARK: - Einstellungen Export / Import
+
+    private var settingsFileType: UTType { UTType(filenameExtension: SettingsIO.fileExtension) ?? .propertyList }
+
+    @objc private func exportSettings() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [settingsFileType]
+        panel.nameFieldStringValue = "Win7Taskbar-Einstellungen.\(SettingsIO.fileExtension)"
+        panel.message = "Alle Einstellungen (inkl. eigener Orbs/Finder-Icon) in eine Datei sichern."
+        let run: (NSApplication.ModalResponse) -> Void = { resp in
+            guard resp == .OK, let url = panel.url, let data = SettingsIO.makeExportData() else { return }
+            do { try data.write(to: url) }
+            catch {
+                let a = NSAlert(); a.messageText = "Export fehlgeschlagen"
+                a.informativeText = error.localizedDescription; a.runModal()
+            }
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: run) } else { panel.begin(completionHandler: run) }
+    }
+
+    @objc private func importSettings() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [settingsFileType, .propertyList, .data]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Einstellungsdatei (.\(SettingsIO.fileExtension)) wählen."
+        let run: (NSApplication.ModalResponse) -> Void = { [weak self] resp in
+            guard resp == .OK, let url = panel.url else { return }
+            guard let data = try? Data(contentsOf: url), SettingsIO.importData(data) else {
+                let a = NSAlert(); a.messageText = "Import fehlgeschlagen"
+                a.informativeText = "Die Datei konnte nicht gelesen werden."; a.runModal(); return
+            }
+            let a = NSAlert()
+            a.messageText = "Einstellungen importiert"
+            a.informativeText = "Die Taskleiste wird jetzt neu gestartet, damit alles angewendet wird."
+            a.addButton(withTitle: "Neu starten")
+            a.runModal()
+            self?.window?.close()
+            SettingsIO.relaunchApp()
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: run) } else { panel.begin(completionHandler: run) }
     }
 
     @objc private func quitAction() { NSApp.terminate(nil) }
