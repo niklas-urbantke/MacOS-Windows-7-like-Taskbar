@@ -36,7 +36,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let orb = StartOrbButton()
     private let clock = ClockView()
     private let battery = BatteryView()
-    private let volume = TrayIconButton(symbol: "speaker.wave.2.fill")
+    private let volume = VolumeView()
+    private let flag = NotificationFlagView()
     private let showDesktop = ShowDesktopButton()
     private let nowPlayingView = NowPlayingView(frame: .zero)
     private let wifiView = WifiView(frame: .zero)
@@ -240,7 +241,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
         for v in [showDesktop, clock, volume] { v.autoresizingMask = [.minXMargin]; glass.addSubview(v) }
         if hasBattery { battery.autoresizingMask = [.minXMargin]; glass.addSubview(battery) }
-        for v in [nowPlayingView, wifiView, monitorView] { v.autoresizingMask = [.minXMargin] }
+        for v in [nowPlayingView, wifiView, monitorView, flag] { v.autoresizingMask = [.minXMargin] }
         for v: NSView in [win11Clock, win11Performance, win11Media] {
             v.autoresizingMask = [.minXMargin]
         }
@@ -252,7 +253,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     /// Each profile owns its own set of tray views; the other set is detached from the hierarchy.
     private func layoutTray() {
         if Theme.isWin11 {
-            for v: NSView in [clock, volume, battery, wifiView, monitorView, nowPlayingView] { v.removeFromSuperview() }
+            for v: NSView in [clock, volume, battery, wifiView, monitorView, nowPlayingView, flag] { v.removeFromSuperview() }
             layoutTrayWin11()
         } else {
             for v: NSView in [win11Clock, win11Performance, win11Media] { v.removeFromSuperview() }
@@ -300,7 +301,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     /// Vista / Windows 7 tray.
     private func layoutTrayClassic() {
         let h = Theme.barHeight
-        let gap: CGFloat = 10          // uniform spacing between tray elements
+        let gap: CGFloat = Theme.s(Theme.trayGapValue)   // spacing between tray elements (adjustable)
         var x = glass.bounds.width
 
         // Show-desktop sliver sits at the very edge; every other element gets a uniform gap.
@@ -312,28 +313,49 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             return NSRect(x: x, y: 0, width: width, height: h)
         }
 
+        // Clock is fixed at the right; the other elements follow the user's order (settings → Tray).
         clock.frame = slot(Theme.clockWidth)
-        volume.frame = slot(Theme.volumeWidth)
-        if hasBattery { battery.frame = slot(Theme.batteryWidth) }
 
-        if wifiEnabled {
-            wifiView.frame = slot(Theme.wifiWidth)
-            if wifiView.superview == nil { glass.addSubview(wifiView) }
-            wifiView.refresh()
-        } else { wifiView.removeFromSuperview() }
-
-        if showsMonitor {
-            monitorView.frame = slot(Theme.monitorWidth)
-            if monitorView.superview == nil { glass.addSubview(monitorView) }
-            monitorView.refresh()
-        } else { monitorView.removeFromSuperview() }
-
-        if showsMedia {
-            nowPlayingView.frame = slot(nowPlayingView.preferredWidth)
-            if nowPlayingView.superview == nil { glass.addSubview(nowPlayingView) }
-            nowPlayingView.refresh()
-        } else {
-            nowPlayingView.removeFromSuperview()
+        // `trayOrder` is left→right, so place it reversed (rightmost element first).
+        for id in Theme.trayOrder.reversed() {
+            switch id {
+            case "volume":
+                volume.frame = slot(Theme.volumeWidth)
+                if volume.superview == nil { glass.addSubview(volume) }
+                volume.refresh()
+            case "battery":
+                if hasBattery {
+                    battery.frame = slot(Theme.batteryWidth)
+                    if battery.superview == nil { glass.addSubview(battery) }
+                } else { battery.removeFromSuperview() }
+            case "network":
+                if wifiEnabled {
+                    wifiView.frame = slot(Theme.wifiWidth)
+                    if wifiView.superview == nil { glass.addSubview(wifiView) }
+                    wifiView.refresh()
+                } else { wifiView.removeFromSuperview() }
+            case "flag":
+                if flagEnabled {
+                    flag.frame = slot(Theme.flagWidth)
+                    if flag.superview == nil { glass.addSubview(flag) }
+                    flag.refresh()
+                } else { flag.removeFromSuperview() }
+            case "monitor":
+                if showsMonitor {
+                    monitorView.frame = slot(Theme.monitorWidth)
+                    if monitorView.superview == nil { glass.addSubview(monitorView) }
+                    monitorView.refresh()
+                } else { monitorView.removeFromSuperview() }
+            case "media":
+                if showsMedia {
+                    let mediaW = Theme.trayItemSizeOverride("media").map(Theme.s) ?? nowPlayingView.preferredWidth
+                    nowPlayingView.frame = slot(mediaW)
+                    if nowPlayingView.superview == nil { glass.addSubview(nowPlayingView) }
+                    nowPlayingView.refresh()
+                } else { nowPlayingView.removeFromSuperview() }
+            default:
+                break
+            }
         }
 
         trayLeftX = x
@@ -1012,6 +1034,64 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         Self.forAll { $0.applyBarHeight() }
     }
 
+    // Symbolgröße im System-Tray (px, Standard 24).
+    var trayIconSizeValue: CGFloat { Theme.trayIconSizeValue }
+    var defaultTrayIconSize: CGFloat { Theme.defaultTrayIconSize }
+    func setTrayIconSize(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "trayIconSize")
+        Self.forAll { $0.applyBarHeight() }
+    }
+
+    // Abstand zwischen den Tray-Symbolen (px, Standard 4).
+    var trayGapValue: CGFloat { Theme.trayGapValue }
+    var defaultTrayGap: CGFloat { Theme.defaultTrayGap }
+    func setTrayGap(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: "trayGap")
+        Self.forAll { $0.applyBarHeight() }
+    }
+
+    // Benachrichtigungs-Flagge (Win7 Action Center) im Tray anzeigen (Standard: an).
+    var flagEnabled: Bool { UserDefaults.standard.object(forKey: "showFlag") == nil || UserDefaults.standard.bool(forKey: "showFlag") }
+    func setFlagEnabled(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "showFlag")
+        Self.forAll { $0.applyBarHeight() }
+    }
+
+    // Reihenfolge der Tray-Symbole (links→rechts), ohne die fest rechts stehende Uhr.
+    var trayOrder: [String] { Theme.trayOrder }
+    func trayElementLabel(_ id: String) -> String {
+        switch id {
+        case "flag":    return "Benachrichtigungen"
+        case "network": return "Netzwerk (WLAN/LAN)"
+        case "battery": return "Akku"
+        case "volume":  return "Lautstärke"
+        case "monitor": return "CPU/RAM"
+        case "media":   return "Medien"
+        default:        return id
+        }
+    }
+    func setTrayOrder(_ order: [String]) {
+        UserDefaults.standard.set(order, forKey: "trayOrder")
+        Self.forAll { $0.applyBarHeight() }
+    }
+
+    // Größe je Tray-Symbol: Override (px) oder nil = allgemeine Größe / Standardbreite verwenden.
+    func trayItemSize(_ id: String) -> CGFloat? { Theme.trayItemSizeOverride(id) }
+    /// Effektive aktuelle Größe (für die Slider-Startposition beim Umschalten auf „eigene Größe").
+    func trayItemEffectiveSize(_ id: String) -> CGFloat {
+        switch id {
+        case "monitor": return Theme.trayItemSizeOverride("monitor") ?? Theme.defaultMonitorWidth
+        case "media":   return Theme.trayItemSizeOverride("media") ?? Theme.defaultMediaWidth
+        default:        return Theme.trayGlyph(for: id)
+        }
+    }
+    func setTrayItemSize(_ id: String, _ value: CGFloat?) {
+        let key = "traySize." + id
+        if let value, value > 0 { UserDefaults.standard.set(Double(value), forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+        Self.forAll { $0.applyBarHeight() }
+    }
+
     // Icon-Rahmen über volle Höhe.
     var fullHeightIcons: Bool { UserDefaults.standard.bool(forKey: "fullHeightIcons") }
     func setFullHeightIcons(_ on: Bool) {
@@ -1227,6 +1307,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         } else {
             clock.refresh()
             battery.refresh()
+            volume.refresh()
         }
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -1243,6 +1324,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             } else {
                 self.clock.refresh()
                 self.battery.refresh()
+                if self.tick % 2 == 0 { self.volume.refresh() }
                 if self.wifiEnabled && self.tick % 5 == 0 { self.wifiView.refresh() }
                 if self.showsMonitor && self.tick % 2 == 0 { self.monitorView.refresh() }
                 if self.showsMedia && self.tick % 3 == 0 { self.nowPlayingView.refresh() }
@@ -1608,72 +1690,19 @@ private final class ShowDesktopButton: NSView {
 private final class BatteryView: NSView {
     private var info: SystemInfo.Battery?
 
-    func refresh() { info = SystemInfo.battery(); needsDisplay = true }
+    func refresh() {
+        info = SystemInfo.battery()
+        toolTip = info.map { "Akku \($0.percent) %" + ($0.charging ? " (lädt)" : "") }
+        needsDisplay = true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let info else { return }
-        // Percentage text.
-        let style = NSMutableParagraphStyle(); style.alignment = .center
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: Theme.font(12, weight: .medium),
-            .foregroundColor: ClassicTray.text, .paragraphStyle: style,
-        ]
-        let s = NSAttributedString(string: "\(info.percent)%", attributes: attrs)
-        s.draw(in: NSRect(x: 0, y: bounds.midY - 16, width: bounds.width, height: 15))
-
-        // Battery glyph.
-        let bodyW: CGFloat = 26, bodyH: CGFloat = 12
-        let bx = (bounds.width - bodyW) / 2, by = bounds.midY + 3
-        let body = NSRect(x: bx, y: by, width: bodyW, height: bodyH)
-        let outline = ClassicTray.pick(NSColor(calibratedWhite: 1, alpha: 0.85), Theme.Aero.secondaryText)
-        outline.setStroke()
-        let bp = NSBezierPath(roundedRect: body, xRadius: 2, yRadius: 2); bp.lineWidth = 1.2; bp.stroke()
-        // Cap.
-        outline.setFill()
-        NSRect(x: body.maxX, y: by + 3, width: 2, height: bodyH - 6).fill()
-        // Fill level.
-        let level = max(0, min(1, CGFloat(info.percent) / 100))
-        let fillColor = info.charging ? NSColor.systemGreen
-            : (info.percent <= 20 ? NSColor.systemRed : ClassicTray.pick(Theme.accent(brightness: 1.2), Theme.Aero.accent))
-        fillColor.setFill()
-        NSRect(x: bx + 2, y: by + 2, width: (bodyW - 4) * level, height: bodyH - 4).fill()
-        if info.charging {
-            let bolt = NSAttributedString(string: "⚡︎", attributes: [
-                .font: Theme.font(9), .foregroundColor: ClassicTray.text])
-            bolt.draw(at: NSPoint(x: bx + bodyW / 2 - 4, y: by + 1))
-        }
-    }
-}
-
-// MARK: - Generic tray icon button (e.g. volume)
-
-private final class TrayIconButton: NSView {
-    var onClick: (() -> Void)?
-    private let symbol: String
-    private var hovering = false
-
-    init(symbol: String) {
-        self.symbol = symbol
-        super.init(frame: .zero)
-        addTrackingArea(NSTrackingArea(rect: .zero,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
-    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { onClick?() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
-        let cfg = NSImage.SymbolConfiguration(pointSize: 16 * Theme.scale, weight: .regular)
-        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(cfg) {
-            let tinted = ClassicTray.tinted(img, ClassicTray.text)
-            let s = tinted.size
-            tinted.draw(in: NSRect(x: (bounds.width - s.width) / 2,
-                                   y: (bounds.height - s.height) / 2, width: s.width, height: s.height))
-        }
+        // Original Windows 7 battery icon for the nearest 10 % level, charging variant when on power.
+        let bucket = Int((Double(info.percent) / 10).rounded()) * 10
+        let name = String(format: "tray-bat-%03d", max(0, min(100, bucket))) + (info.charging ? "-charging" : "")
+        // Battery graphic sits inside a lot of canvas padding, so render it a bit larger than the rest.
+        ClassicTray.drawIcon(name, in: bounds, glyph: Theme.s(Theme.trayGlyph(for: "battery") + 4))
     }
 }
 

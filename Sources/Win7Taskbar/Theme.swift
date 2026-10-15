@@ -89,12 +89,47 @@ enum Theme {
     static let orbTop = NSColor(calibratedRed: 0.45, green: 0.74, blue: 1.0, alpha: 1.0)
     static let orbBottom = NSColor(calibratedRed: 0.06, green: 0.30, blue: 0.62, alpha: 1.0)
 
-    // System tray (right side), scaled.
-    static var batteryWidth: CGFloat { s(56) }
-    static var volumeWidth: CGFloat { s(30) }
+    // System tray (right side), scaled. Icon slots widen with the chosen tray-icon size.
+    static var defaultTrayIconSize: CGFloat { 24 }
+    /// Base glyph size of the tray symbols (network, volume, flag …), adjustable in settings.
+    static var trayIconSizeValue: CGFloat {
+        let v = UserDefaults.standard.object(forKey: "trayIconSize") as? Double ?? Double(defaultTrayIconSize)
+        return CGFloat(min(40, max(14, v)))
+    }
+    /// Reorderable system-tray elements (the clock stays fixed at the right edge).
+    static let trayElementIDs = ["flag", "network", "battery", "volume", "monitor", "media"]
+    /// Default left→right order of the tray elements (matches the classic Windows 7 arrangement).
+    static let defaultTrayOrder = ["media", "monitor", "flag", "network", "battery", "volume"]
+    /// The user's tray order, sanitised against the known ids and completed with any missing ones.
+    static var trayOrder: [String] {
+        let stored = (UserDefaults.standard.array(forKey: "trayOrder") as? [String]) ?? []
+        var out = stored.filter { trayElementIDs.contains($0) }
+        for id in defaultTrayOrder where !out.contains(id) { out.append(id) }
+        return out
+    }
+
+    static var defaultTrayGap: CGFloat { 4 }
+    /// Spacing between tray elements (px), adjustable in settings.
+    static var trayGapValue: CGFloat {
+        let v = UserDefaults.standard.object(forKey: "trayGap") as? Double ?? Double(defaultTrayGap)
+        return CGFloat(min(24, max(0, v)))
+    }
+    /// Per-item size override (px, unscaled); nil = use the general size / default width.
+    static func trayItemSizeOverride(_ id: String) -> CGFloat? {
+        guard let v = UserDefaults.standard.object(forKey: "traySize." + id) as? Double, v > 0 else { return nil }
+        return CGFloat(v)
+    }
+    /// Glyph size for an icon tray element: its own override, else the general size.
+    static func trayGlyph(for id: String) -> CGFloat { trayItemSizeOverride(id) ?? trayIconSizeValue }
+    static var defaultMonitorWidth: CGFloat { 110 }
+    static var defaultMediaWidth: CGFloat { 210 }
+
+    static var batteryWidth: CGFloat { s(trayGlyph(for: "battery") + 12) }
+    static var volumeWidth: CGFloat { s(trayGlyph(for: "volume") + 9) }
+    static var flagWidth: CGFloat { s(trayGlyph(for: "flag") + 7) }
     static var nowPlayingWidth: CGFloat { s(210) }
-    static var wifiWidth: CGFloat { s(30) }
-    static var monitorWidth: CGFloat { s(80) }
+    static var wifiWidth: CGFloat { s(trayGlyph(for: "network") + 9) }
+    static var monitorWidth: CGFloat { s(trayItemSizeOverride("monitor") ?? defaultMonitorWidth) }
 
     // macOS accent colour the user picked in System Settings, with brightness variants.
     static var accent: NSColor { NSColor.controlAccentColor }

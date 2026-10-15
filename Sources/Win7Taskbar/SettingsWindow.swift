@@ -28,6 +28,13 @@ final class SettingsWindowController: NSObject {
     private let iconWidthLabel = NSTextField(labelWithString: "")
     private let orbGapSlider = NSSlider(frame: .zero)
     private let orbGapLabel = NSTextField(labelWithString: "")
+    private let trayIconSizeSlider = NSSlider(frame: .zero)
+    private let trayIconSizeLabel = NSTextField(labelWithString: "")
+    private let trayGapSlider = NSSlider(frame: .zero)
+    private let trayGapLabel = NSTextField(labelWithString: "")
+    private let flagBox = NSButton(checkboxWithTitle: "Benachrichtigungs-Flagge anzeigen", target: nil, action: nil)
+    private let trayOrderList = TrayOrderListView()
+    private var traySizeRows: [TraySizeRow] = []
 
     // Startmenü-Tastenkürzel-Rekorder.
     private let hotkeyButton = HotkeyRecorderButton(title: "—", target: nil, action: nil)
@@ -160,6 +167,24 @@ final class SettingsWindowController: NSObject {
         orbGapRow.orientation = .horizontal
         orbGapRow.spacing = 8
 
+        trayIconSizeSlider.isContinuous = true
+        trayIconSizeSlider.target = self
+        trayIconSizeSlider.action = #selector(trayIconSizeChanged)
+        trayIconSizeSlider.translatesAutoresizingMaskIntoConstraints = false
+        trayIconSizeSlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        let trayIconSizeRow = NSStackView(views: [NSTextField(labelWithString: "Symbolgröße:"), trayIconSizeSlider, trayIconSizeLabel])
+        trayIconSizeRow.orientation = .horizontal
+        trayIconSizeRow.spacing = 8
+
+        trayGapSlider.isContinuous = true
+        trayGapSlider.target = self
+        trayGapSlider.action = #selector(trayGapChanged)
+        trayGapSlider.translatesAutoresizingMaskIntoConstraints = false
+        trayGapSlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        let trayGapRow = NSStackView(views: [NSTextField(labelWithString: "Abstand der Symbole:"), trayGapSlider, trayGapLabel])
+        trayGapRow.orientation = .horizontal
+        trayGapRow.spacing = 8
+
         // Taskleisten-Stil-Profil.
         taskbarStylePopup.removeAllItems()
         taskbarStylePopup.addItems(withTitles: taskbarStyles.map { $0.label })
@@ -240,7 +265,7 @@ final class SettingsWindowController: NSObject {
         menuHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
 
         for box in [dockBox, reserveBox, finderBox, finderDesktopBox, nowPlayingBox,
-                    wifiBox, monitorBox, autostartBox, fullHeightBox, secondsBox, allScreensBox, autoHideBox] {
+                    wifiBox, monitorBox, autostartBox, fullHeightBox, secondsBox, allScreensBox, autoHideBox, flagBox] {
             box.target = self
             box.action = #selector(changed(_:))
         }
@@ -325,9 +350,39 @@ final class SettingsWindowController: NSObject {
                                        [tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
                                         menuHeader, menuOpacityRow, menuBlurRow]))
         classicOnlyControls = [orbPopup, addButton, folderButton, menuStylePopup, menuEditButton, fullHeightBox, wifiBox,
+                               flagBox, trayIconSizeSlider, trayGapSlider,
                                taskbarOpacitySlider, taskbarBlurSlider, win7GlassSlider,
                                menuOpacitySlider, menuBlurSlider]
-        tabView.addTabViewItem(makeTab("Tray", [nowPlayingBox, wifiBox, monitorBox, secondsBox]))
+        let traySizeHeader = NSTextField(labelWithString: "Größe & Positionierung")
+        traySizeHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        // Per-item size editor (each item: own size or the general size / default width).
+        let perItemHeader = NSTextField(labelWithString: "Größe je Symbol")
+        perItemHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let sizeSpecs: [(String, String, CGFloat, CGFloat)] = [
+            ("flag", "Benachrichtigungen", 14, 40),
+            ("network", "Netzwerk", 14, 40),
+            ("battery", "Akku", 14, 40),
+            ("volume", "Lautstärke", 14, 40),
+            ("monitor", "CPU/RAM (Breite)", 60, 220),
+            ("media", "Medien (Breite)", 120, 360),
+        ]
+        traySizeRows = sizeSpecs.map { spec in
+            let row = TraySizeRow(id: spec.0, label: spec.1, min: spec.2, max: spec.3)
+            row.onChange = { [weak self] id, v in self?.controller?.setTrayItemSize(id, v) }
+            return row
+        }
+        let trayOrderHeader = NSTextField(labelWithString: "Reihenfolge")
+        trayOrderHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let trayOrderHint = NSTextField(labelWithString: "Symbole per Drag & Drop sortieren (oben = links). Die Uhr bleibt rechts.")
+        trayOrderHint.textColor = .secondaryLabelColor
+        trayOrderHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        trayOrderList.onReorder = { [weak self] order in self?.controller?.setTrayOrder(order) }
+        let trayFeaturesHeader = NSTextField(labelWithString: "Funktionen")
+        trayFeaturesHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        tabView.addTabViewItem(makeTab("Tray", [traySizeHeader, trayIconSizeRow, trayGapRow,
+                                                perItemHeader] + traySizeRows + [
+                                                trayOrderHeader, trayOrderHint, trayOrderList,
+                                                trayFeaturesHeader, flagBox, nowPlayingBox, wifiBox, monitorBox, secondsBox]))
         tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox, finderIconRow]))
 
         // Kalender: Termine aus allen in macOS eingebundenen Konten (Outlook/Exchange, Google …).
@@ -454,6 +509,7 @@ final class SettingsWindowController: NSObject {
         nowPlayingBox.state = c.nowPlayingEnabled ? .on : .off
         wifiBox.state = c.wifiEnabled ? .on : .off
         monitorBox.state = c.monitorEnabled ? .on : .off
+        flagBox.state = c.flagEnabled ? .on : .off
         autostartBox.state = c.autostartEnabled ? .on : .off
         secondsBox.state = c.clockSeconds ? .on : .off
         if let idx = previewModes.firstIndex(where: { $0.value == c.previewMode }) {
@@ -494,6 +550,18 @@ final class SettingsWindowController: NSObject {
         orbGapSlider.maxValue = 80
         orbGapSlider.doubleValue = Double(c.orbGapValue)
         orbGapLabel.stringValue = "\(Int(c.orbGapValue)) px"
+        trayIconSizeSlider.minValue = 14
+        trayIconSizeSlider.maxValue = 40
+        trayIconSizeSlider.doubleValue = Double(c.trayIconSizeValue)
+        trayIconSizeLabel.stringValue = "\(Int(c.trayIconSizeValue)) px"
+        trayGapSlider.minValue = 0
+        trayGapSlider.maxValue = 24
+        trayGapSlider.doubleValue = Double(c.trayGapValue)
+        trayGapLabel.stringValue = "\(Int(c.trayGapValue)) px"
+        trayOrderList.setItems(c.trayOrder.map { ($0, c.trayElementLabel($0)) })
+        for row in traySizeRows {
+            row.configure(value: c.trayItemSize(row.id), manualDefault: c.trayItemEffectiveSize(row.id))
+        }
 
         if let idx = taskbarStyles.firstIndex(where: { $0.value == c.taskbarStyle }) {
             taskbarStylePopup.selectItem(at: idx)
@@ -663,6 +731,20 @@ final class SettingsWindowController: NSObject {
         controller?.setOrbGap(CGFloat(v))
     }
 
+    @objc private func trayIconSizeChanged() {
+        let v = trayIconSizeSlider.doubleValue.rounded()
+        trayIconSizeLabel.stringValue = "\(Int(v)) px"
+        guard sliderReleased else { return }
+        controller?.setTrayIconSize(CGFloat(v))
+    }
+
+    @objc private func trayGapChanged() {
+        let v = trayGapSlider.doubleValue.rounded()
+        trayGapLabel.stringValue = "\(Int(v)) px"
+        guard sliderReleased else { return }
+        controller?.setTrayGap(CGFloat(v))
+    }
+
     @objc private func orbChanged() {
         guard let c = controller, orbPopup.indexOfSelectedItem >= 0,
               orbPopup.indexOfSelectedItem < orbs.count else { return }
@@ -823,6 +905,8 @@ final class SettingsWindowController: NSObject {
             c.setShowOnAllScreens(on)
         case autoHideBox:
             c.setAutoHide(on)
+        case flagBox:
+            c.setFlagEnabled(on)
         default:
             break
         }

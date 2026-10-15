@@ -1,5 +1,6 @@
 import AppKit
 import CoreWLAN
+import SystemConfiguration
 
 /// Colours and helpers of the classic (Vista / Windows 7) tray. Dark mode keeps the original
 /// values exactly, light mode uses the Aero palette (dark glyphs on bright glass).
@@ -28,6 +29,28 @@ enum ClassicTray {
         rim.stroke()
     }
 
+    /// Draws an original Windows 7 tray PNG (bundled in ThemeResources, loaded via ThemeAssets),
+    /// scaled to `glyph` height and centred in `rect`, preserving aspect ratio. These icons are made
+    /// for dark Aero glass (light glyphs), so on the bright glass a soft dark shadow lifts them.
+    static func drawIcon(_ name: String, in rect: NSRect, glyph: CGFloat, tint: NSColor? = nil) {
+        guard let base = ThemeAssets.image(name) else { return }
+        let img = tint.map { tinted(base, $0) } ?? base
+        let aspect = img.size.height > 0 ? img.size.width / img.size.height : 1
+        let h = glyph, w = (h * aspect).rounded()
+        let dst = NSRect(x: (rect.width - w) / 2 + rect.minX,
+                         y: (rect.height - h) / 2 + rect.minY, width: w, height: h)
+        NSGraphicsContext.saveGraphicsState()
+        if !Theme.isDark {
+            let sh = NSShadow()
+            sh.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.55)
+            sh.shadowBlurRadius = 1.5
+            sh.shadowOffset = NSSize(width: 0, height: -0.5)
+            sh.set()
+        }
+        img.draw(in: dst, from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
     /// `image` (an SF symbol) coloured with `color`. The glyph is used as alpha mask, so a
     /// translucent colour keeps its own alpha (same result as a sourceAtop tint for opaque ones).
     static func tinted(_ image: NSImage, _ color: NSColor) -> NSImage {
@@ -40,9 +63,11 @@ enum ClassicTray {
     }
 }
 
-/// Wi-Fi status icon: shows connection state, SSID as tooltip, opens Wi-Fi settings on click.
+/// Network status icon (original Windows 7 symbols): Wi-Fi with signal strength, wired, or
+/// disconnected. SSID as tooltip, opens network settings on click.
 final class WifiView: NSView {
-    private var connected = false
+    private enum State { case wireless(Int), wired, disconnected }   // wireless: 0/25/50/75/100
+    private var state: State = .disconnected
     private var hovering = false
 
     override init(frame frameRect: NSRect) {
@@ -59,27 +84,124 @@ final class WifiView: NSView {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
     }
 
+    /// Any default-route connectivity (used to tell "wired" from "no network" when Wi-Fi is off).
+    private func isOnline() -> Bool {
+        var addr = sockaddr(); addr.sa_len = UInt8(MemoryLayout<sockaddr>.size)
+        addr.sa_family = sa_family_t(AF_INET)
+        guard let r = SCNetworkReachabilityCreateWithAddress(nil, &addr) else { return false }
+        var flags = SCNetworkReachabilityFlags()
+        guard SCNetworkReachabilityGetFlags(r, &flags) else { return false }
+        return flags.contains(.reachable) && !flags.contains(.connectionRequired)
+    }
+
     func refresh() {
-        // Without Location permission macOS hides the SSID, so a signal (RSSI) also counts as connected.
         let iface = CWWiFiClient.shared().interface()
+        // Without Location permission macOS hides the SSID, so a signal (RSSI) also counts as connected.
+        let wifiOn = iface?.powerOn() == true
         let ssid = iface?.ssid()
-        connected = ssid != nil || (iface?.powerOn() == true && (iface?.rssiValue() ?? 0) != 0)
-        toolTip = ssid ?? (connected ? "WLAN verbunden" : "Kein WLAN")
+        let rssi = iface?.rssiValue() ?? 0
+        let wifiConnected = wifiOn && (ssid != nil || rssi != 0)
+
+        if wifiConnected {
+            state = .wireless(Self.bucket(rssi: rssi))
+            toolTip = ssid ?? "WLAN verbunden"
+        } else if isOnline() {
+            state = .wired
+            toolTip = "Netzwerk verbunden (LAN)"
+        } else {
+            state = .disconnected
+            toolTip = "Kein Netzwerk"
+        }
+        needsDisplay = true
+    }
+
+    /// RSSI (dBm) → one of the five original signal levels.
+    private static func bucket(rssi: Int) -> Int {
+        switch rssi {
+        case 0: return 100          // connected but RSSI hidden (no Location permission)
+        case (-55)...: return 100
+        case (-65)...: return 75
+        case (-72)...: return 50
+        case (-80)...: return 25
+        default: return 0
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
+        let name: String
+        switch state {
+        case .wireless(let lvl): name = "tray-wifi-\(lvl)"
+        case .wired:             name = "tray-wired"
+        case .disconnected:      name = "tray-wifi-off"
+        }
+        ClassicTray.drawIcon(name, in: bounds, glyph: Theme.s(Theme.trayGlyph(for: "network")))
+    }
+}
+
+/// Volume status icon (original Windows 7 speaker). Level/mute are polled from CoreAudio; click
+/// opens the volume slider popover (wired up by the controller).
+final class VolumeView: NSView {
+    var onClick: (() -> Void)?
+    private var level = 100
+    private var muted = false
+    private var hovering = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addTrackingArea(NSTrackingArea(rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+
+    func refresh() {
+        if let m = SystemInfo.isMutedFast() { muted = m }
+        if let v = SystemInfo.outputVolumeFast() { level = v }
+        toolTip = muted ? "Ton aus" : "Lautstärke \(level) %"
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
-        let name = connected ? "wifi" : "wifi.slash"
-        let cfg = NSImage.SymbolConfiguration(pointSize: 15 * Theme.scale, weight: .regular)
-        guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(cfg) else { return }
-        let color = connected ? ClassicTray.text
-            : ClassicTray.pick(NSColor(calibratedWhite: 0.6, alpha: 1), Theme.Aero.disabledText)
-        let tinted = ClassicTray.tinted(img, color)
-        let s = tinted.size
-        tinted.draw(in: NSRect(x: (bounds.width - s.width) / 2, y: (bounds.height - s.height) / 2,
-                               width: s.width, height: s.height))
+        let name: String
+        if muted || level == 0 { name = "tray-vol-muted" }
+        else if level < 34 { name = "tray-vol-low" }
+        else if level < 67 { name = "tray-vol-medium" }
+        else { name = "tray-vol-high" }
+        ClassicTray.drawIcon(name, in: bounds, glyph: Theme.s(Theme.trayGlyph(for: "volume")))
+    }
+}
+
+/// Windows 7 "Action Center" flag. Click opens macOS notification settings (the closest analogue).
+final class NotificationFlagView: NSView {
+    private var hovering = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        toolTip = "Benachrichtigungen"
+        addTrackingArea(NSTrackingArea(rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {
+        SystemInfo.openNotificationCenter()
+    }
+
+    func refresh() { needsDisplay = true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
+        // Original upright Windows 7 flag (already white); light-mode shadow handled by drawIcon.
+        ClassicTray.drawIcon("tray-flag", in: bounds, glyph: Theme.s(Theme.trayGlyph(for: "flag")))
     }
 }
 
@@ -112,7 +234,8 @@ final class HardwareMonitorView: NSView {
     }
 
     private func drawBar(value: Int, x: CGFloat, y: CGFloat) {
-        let w = max(Theme.s(8), min(Theme.s(18), bounds.width - x - Theme.s(2)))
+        // Fill the remaining width so the load is actually readable (widen the widget in settings).
+        let w = max(Theme.s(12), bounds.width - x - Theme.s(4))
         let track = NSRect(x: bounds.minX + x, y: y, width: w, height: Theme.s(6))
         ClassicTray.pick(NSColor(calibratedWhite: 1, alpha: 0.2), Theme.Aero.track).setFill()
         NSBezierPath(roundedRect: track, xRadius: 2, yRadius: 2).fill()
