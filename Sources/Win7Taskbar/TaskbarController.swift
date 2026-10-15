@@ -1100,6 +1100,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         UserDefaults.standard.set(v, forKey: "iconHoverEffect")
         Self.forAll { $0.buttons.forEach { $0.needsDisplay = true } }
     }
+    var glowColorForClosed: Bool { Theme.glowColorForClosed }
+    func setGlowColorForClosed(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "glowColorClosed")
+        Self.forAll { $0.buttons.forEach { $0.needsDisplay = true } }
+    }
 
     // Icon-Rahmen über volle Höhe.
     var fullHeightIcons: Bool { UserDefaults.standard.bool(forKey: "fullHeightIcons") }

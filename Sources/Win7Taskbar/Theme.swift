@@ -33,6 +33,11 @@ enum Theme {
     /// Hover behaviour of the taskbar icons (classic Vista/Win7 profiles). Extensible; "glow" is the
     /// Windows-7 colour hot-track, "none" disables it. Default: glow.
     static var iconHoverEffect: String { UserDefaults.standard.string(forKey: "iconHoverEffect") ?? "glow" }
+    /// Colour the hover glow of not-running (pinned/closed) apps too. Off = a neutral white glow for
+    /// them; running apps always glow in their icon colour. Default: on.
+    static var glowColorForClosed: Bool {
+        UserDefaults.standard.object(forKey: "glowColorClosed") == nil || UserDefaults.standard.bool(forKey: "glowColorClosed")
+    }
 
     // Configurable gap between the Start orb and the first icon (px, scaled). Default 20.
     static let defaultOrbGap: CGFloat = 20

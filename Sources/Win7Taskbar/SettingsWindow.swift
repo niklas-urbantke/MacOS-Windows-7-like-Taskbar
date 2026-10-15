@@ -67,6 +67,7 @@ final class SettingsWindowController: NSObject {
         ("Farbschimmer (folgt Maus)", "glow"),
         ("Farbschimmer (um das Icon)", "glow-icon"),
         ("Aus", "none")]
+    private let glowClosedBox = NSButton(checkboxWithTitle: "Auch für geschlossene Anwendungen farbiger Glow", target: nil, action: nil)
 
     // Kalender-Termine (EventKit): Schalter, Hinweis und Kalenderauswahl.
     private let eventsBox = NSButton(checkboxWithTitle: "Termine im Kalender der Uhr anzeigen", target: nil, action: nil)
@@ -272,7 +273,7 @@ final class SettingsWindowController: NSObject {
         menuHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
 
         for box in [dockBox, reserveBox, finderBox, finderDesktopBox, nowPlayingBox,
-                    wifiBox, monitorBox, autostartBox, fullHeightBox, secondsBox, allScreensBox, autoHideBox, flagBox] {
+                    wifiBox, monitorBox, autostartBox, fullHeightBox, secondsBox, allScreensBox, autoHideBox, flagBox, glowClosedBox] {
             box.target = self
             box.action = #selector(changed(_:))
         }
@@ -360,13 +361,13 @@ final class SettingsWindowController: NSObject {
         hoverRow.orientation = .horizontal
         hoverRow.spacing = 8
 
-        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, appearanceRow, previewRow, hoverRow, orbRow, styleRow, heightRow, iconWidthRow, orbGapRow, fullHeightBox,
+        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, appearanceRow, previewRow, hoverRow, glowClosedBox, orbRow, styleRow, heightRow, iconWidthRow, orbGapRow, fullHeightBox,
                                                        win11Header, win11Row, acrylicGrid, resetAcrylic]))
         tabView.addTabViewItem(makeTab("Transparenz",
                                        [tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
                                         menuHeader, menuOpacityRow, menuBlurRow]))
         classicOnlyControls = [orbPopup, addButton, folderButton, menuStylePopup, menuEditButton, fullHeightBox, wifiBox,
-                               flagBox, trayIconSizeSlider, trayGapSlider, hoverEffectPopup,
+                               flagBox, trayIconSizeSlider, trayGapSlider, hoverEffectPopup, glowClosedBox,
                                taskbarOpacitySlider, taskbarBlurSlider, win7GlassSlider,
                                menuOpacitySlider, menuBlurSlider]
         let traySizeHeader = NSTextField(labelWithString: "Größe & Positionierung")
@@ -534,6 +535,7 @@ final class SettingsWindowController: NSObject {
         if let idx = hoverEffects.firstIndex(where: { $0.value == c.iconHoverEffect }) {
             hoverEffectPopup.selectItem(at: idx)
         }
+        glowClosedBox.state = c.glowColorForClosed ? .on : .off
         // DockDoor only selectable when installed.
         previewPopup.item(at: 0)?.isEnabled = Theme.isDockDoorInstalled
         previewPopup.autoenablesItems = false
@@ -932,6 +934,8 @@ final class SettingsWindowController: NSObject {
             c.setAutoHide(on)
         case flagBox:
             c.setFlagEnabled(on)
+        case glowClosedBox:
+            c.setGlowColorForClosed(on)
         default:
             break
         }

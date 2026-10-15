@@ -290,7 +290,9 @@ final class TaskbarButton: NSControl {
                 : min(max(frontBox.minX + 8, hoverX), frontBox.maxX - 8)
             let cy = bounds.midY
             let radius = bounds.height * 0.8
-            let c = glowColor
+            // Running apps always glow in their icon colour; not-running ones only if enabled,
+            // otherwise a neutral white glow.
+            let c = (running || Theme.glowColorForClosed) ? glowColor : NSColor(calibratedWhite: 1, alpha: 1)
             NSGraphicsContext.current?.saveGraphicsState()
             path.addClip()   // keep the light inside this button
             NSGraphicsContext.current?.compositingOperation = .plusLighter
