@@ -336,7 +336,7 @@ final class UpdateProgressWindow {
 
     func show() {
         window.center()
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
 

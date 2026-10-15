@@ -122,6 +122,9 @@ final class WindowSpaceReserver {
 
     private func clamp(_ win: AXUIElement, _ areas: [Area]) {
         if boolAttr(win, kAXMinimizedAttribute) == true { return }
+        // Only ever move/resize ordinary document windows. System overlays, panels and dialogs
+        // (e.g. Spotlight, sheets) must stay untouched so we never fight the WindowServer for them.
+        if let sub = stringAttr(win, kAXSubroleAttribute), sub != (kAXStandardWindowSubrole as String) { return }
         guard let pos = pointAttr(win, kAXPositionAttribute),
               let size = sizeAttr(win, kAXSizeAttribute) else { return }
 
@@ -170,6 +173,12 @@ final class WindowSpaceReserver {
         var sz = CGSize.zero
         AXValueGetValue(v as! AXValue, .cgSize, &sz)
         return sz
+    }
+
+    private func stringAttr(_ el: AXUIElement, _ attr: String) -> String? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, attr as CFString, &ref) == .success else { return nil }
+        return ref as? String
     }
 
     private func boolAttr(_ el: AXUIElement, _ attr: String) -> Bool? {

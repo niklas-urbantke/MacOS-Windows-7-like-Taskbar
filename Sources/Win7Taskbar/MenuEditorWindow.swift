@@ -30,7 +30,7 @@ final class MenuEditorWindowController: NSObject, NSTextFieldDelegate {
         updateAvatarButton()
         rebuildRows()
         window?.center()
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
     }
 

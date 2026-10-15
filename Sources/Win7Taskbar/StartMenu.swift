@@ -374,7 +374,7 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         let y = orbScreenRect.maxY + 1
         let finalOrigin = NSPoint(x: x, y: y)
 
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
 
         // Always sits above the taskbar (no positional slide → never overlaps the bar).
         window.setFrameOrigin(finalOrigin)

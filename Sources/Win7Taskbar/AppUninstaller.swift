@@ -95,7 +95,7 @@ enum AppUninstaller {
         guard canUninstall(appURL) else { return }
         let bundleID = entry.bundleID ?? Bundle(url: appURL)?.bundleIdentifier
 
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         let ask = NSAlert()
         ask.messageText = "„\(entry.name)“ wirklich deinstallieren?"
         ask.informativeText = "Die App und alle ihre Daten werden in den Papierkorb gelegt."
@@ -137,7 +137,7 @@ enum AppUninstaller {
     }
 
     private static func report(_ title: String, _ text: String) {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         let a = NSAlert()
         a.messageText = title
         a.informativeText = text

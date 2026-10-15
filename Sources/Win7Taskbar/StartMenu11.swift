@@ -576,7 +576,7 @@ final class StartMenu11Controller: NSObject, NSTextFieldDelegate {
         x = min(max(x, sf.minX + 12), sf.maxX - M.width - 12)
         let final = NSRect(x: x, y: y, width: M.width, height: height)
 
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         if reduceMotion {
             window.setFrame(final, display: true)
             window.alphaValue = 1

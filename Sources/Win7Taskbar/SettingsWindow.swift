@@ -93,7 +93,7 @@ final class SettingsWindowController: NSObject {
         syncFromController()
         reloadCalendarSettings()
         window?.center()
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
     }
 
