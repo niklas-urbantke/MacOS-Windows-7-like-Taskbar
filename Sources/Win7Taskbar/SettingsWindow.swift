@@ -2,9 +2,19 @@ import AppKit
 import UniformTypeIdentifiers
 
 /// Central settings window collecting all toggles.
-final class SettingsWindowController: NSObject {
+final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     weak var controller: TaskbarController?
     private var window: NSWindow?
+
+    // Sidebar navigation (System-Settings look) with search and a version/reset footer.
+    private struct PaneSection { let id: String; let title: String; let icon: String; let keywords: String; let view: NSView }
+    private var allSections: [PaneSection] = []
+    private var shownSections: [PaneSection] = []
+    private let sidebarTable = NSTableView()
+    private let searchField = NSSearchField()
+    private let contentContainer = NSView()
+    private var currentPane: NSView?
+    private let versionLabel = NSTextField(labelWithString: "")
 
     private let dockBox = NSButton(checkboxWithTitle: "macOS-Dock ausblenden", target: nil, action: nil)
     private let reserveBox = NSButton(checkboxWithTitle: "Fensterbereich reservieren (Bedienungshilfen)", target: nil, action: nil)
@@ -107,15 +117,18 @@ final class SettingsWindowController: NSObject {
         reloadOrbPopup()        // pick up orbs added/dropped since last time
         syncFromController()
         reloadCalendarSettings()
-        window?.center()
+        guard let w = window else { return }
         NSApp.activate()
-        window?.makeKeyAndOrderFront(nil)
+        w.makeKeyAndOrderFront(nil)
+        // As an accessory (LSUIElement) app we don't always become frontmost, so force the window
+        // above other apps' windows so it reliably lands in the foreground when opened.
+        w.orderFrontRegardless()
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 470),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 560),
                          styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        w.contentMinSize = NSSize(width: 560, height: 320)
+        w.contentMinSize = NSSize(width: 660, height: 440)
         w.title = "Windows 7 Taskleiste – Einstellungen"
         w.isReleasedWhenClosed = false
 
@@ -311,9 +324,6 @@ final class SettingsWindowController: NSObject {
         finderIconRow.orientation = .horizontal
         finderIconRow.spacing = 8
 
-        // Categorised tabs.
-        let tabView = NSTabView()
-        tabView.translatesAutoresizingMaskIntoConstraints = false
         let dockPinsButton = NSButton(title: "Angeheftete Dock-Apps übernehmen", target: self, action: #selector(importDockPins))
         dockPinsButton.bezelStyle = .rounded
         let exportButton = NSButton(title: "Einstellungen exportieren…", target: self, action: #selector(exportSettings))
@@ -340,8 +350,7 @@ final class SettingsWindowController: NSObject {
         updButtonsRow.orientation = .horizontal; updButtonsRow.spacing = 8
         updAutoBox.target = self; updAutoBox.action = #selector(updAutoToggled)
 
-        tabView.addTabViewItem(makeTab("Allgemein", [dockBox, reserveBox, autoHideBox, autostartBox, allScreensBox, hotkeyRow, dockPinsButton, backupRow,
-                                                     updHeader, updInfoLabel, updVersionRow, updDevBox, updButtonsRow, updAutoBox]))
+        // Fenstervorschau + Icon-Hover-Effekt (Taskleiste).
         previewPopup.removeAllItems()
         previewPopup.addItems(withTitles: previewModes.map { $0.label })
         previewPopup.target = self
@@ -361,20 +370,9 @@ final class SettingsWindowController: NSObject {
         hoverRow.orientation = .horizontal
         hoverRow.spacing = 8
 
-        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, appearanceRow, previewRow, hoverRow, glowClosedBox, orbRow, styleRow, heightRow, iconWidthRow, orbGapRow, fullHeightBox,
-                                                       win11Header, win11Row, acrylicGrid, resetAcrylic]))
-        tabView.addTabViewItem(makeTab("Transparenz",
-                                       [tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
-                                        menuHeader, menuOpacityRow, menuBlurRow]))
-        classicOnlyControls = [orbPopup, addButton, folderButton, menuStylePopup, menuEditButton, fullHeightBox, wifiBox,
-                               flagBox, trayIconSizeSlider, trayGapSlider, hoverEffectPopup, glowClosedBox,
-                               taskbarOpacitySlider, taskbarBlurSlider, win7GlassSlider,
-                               menuOpacitySlider, menuBlurSlider]
-        let traySizeHeader = NSTextField(labelWithString: "Größe & Positionierung")
-        traySizeHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        // Per-item size editor (each item: own size or the general size / default width).
-        let perItemHeader = NSTextField(labelWithString: "Größe je Symbol")
-        perItemHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        // Infobereich (Tray) – Abschnitte.
+        let traySizeHeader = header("Größe & Positionierung")
+        let perItemHeader = header("Größe je Symbol")
         let sizeSpecs: [(String, String, CGFloat, CGFloat)] = [
             ("flag", "Benachrichtigungen", 14, 40),
             ("network", "Netzwerk", 14, 40),
@@ -388,19 +386,12 @@ final class SettingsWindowController: NSObject {
             row.onChange = { [weak self] id, v in self?.controller?.setTrayItemSize(id, v) }
             return row
         }
-        let trayOrderHeader = NSTextField(labelWithString: "Reihenfolge")
-        trayOrderHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let trayOrderHeader = header("Reihenfolge")
         let trayOrderHint = NSTextField(labelWithString: "Symbole per Drag & Drop sortieren (oben = links). Die Uhr bleibt rechts.")
         trayOrderHint.textColor = .secondaryLabelColor
         trayOrderHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         trayOrderList.onReorder = { [weak self] order in self?.controller?.setTrayOrder(order) }
-        let trayFeaturesHeader = NSTextField(labelWithString: "Funktionen")
-        trayFeaturesHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        tabView.addTabViewItem(makeTab("Tray", [traySizeHeader, trayIconSizeRow, trayGapRow,
-                                                perItemHeader] + traySizeRows + [
-                                                trayOrderHeader, trayOrderHint, trayOrderList,
-                                                trayFeaturesHeader, flagBox, nowPlayingBox, wifiBox, monitorBox, secondsBox]))
-        tabView.addTabViewItem(makeTab("Finder", [finderBox, finderDesktopBox, finderIconRow]))
+        let trayFeaturesHeader = header("Funktionen")
 
         // Kalender: Termine aus allen in macOS eingebundenen Konten (Outlook/Exchange, Google …).
         eventsBox.target = self
@@ -411,32 +402,168 @@ final class SettingsWindowController: NSObject {
         calendarList.orientation = .vertical
         calendarList.alignment = .leading
         calendarList.spacing = 6
-        tabView.addTabViewItem(makeTab("Kalender", [eventsBox, eventsStatus, calendarList]))
 
+        let win11Hint = NSTextField(labelWithString: "Nur wirksam im Profil Windows 11.")
+        win11Hint.textColor = .secondaryLabelColor
+        win11Hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+
+        classicOnlyControls = [orbPopup, addButton, folderButton, menuStylePopup, menuEditButton, fullHeightBox, wifiBox,
+                               flagBox, trayIconSizeSlider, trayGapSlider, hoverEffectPopup, glowClosedBox,
+                               taskbarOpacitySlider, taskbarBlurSlider, win7GlassSlider,
+                               menuOpacitySlider, menuBlurSlider]
+
+        // ---------- Panes (neu strukturiert, als Seitenleisten-Navigation) ----------
+        let paneAllgemein = makePaneView([
+            header("Verhalten"),
+            autostartBox, allScreensBox, autoHideBox,
+            header("macOS-Integration"),
+            dockBox, reserveBox,
+        ])
+        let paneTaskbar = makePaneView([
+            header("Profil & Farbe"),
+            tbStyleRow, appearanceRow,
+            header("Größe & Layout"),
+            heightRow, iconWidthRow, orbGapRow, fullHeightBox,
+            header("Icons & Vorschau"),
+            hoverRow, glowClosedBox, previewRow,
+            win11Header, win11Hint, win11Row, acrylicGrid, resetAcrylic,
+        ])
+        let paneStart = makePaneView([
+            header("Start-Symbol"), orbRow,
+            header("Menü"), styleRow,
+            header("Tastenkürzel"), hotkeyRow,
+        ])
+        let paneTray = makePaneView([traySizeHeader, trayIconSizeRow, trayGapRow,
+            perItemHeader] + traySizeRows + [
+            trayOrderHeader, trayOrderHint, trayOrderList,
+            trayFeaturesHeader, flagBox, nowPlayingBox, wifiBox, monitorBox, secondsBox])
+        let paneGlass = makePaneView([
+            tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
+            menuHeader, menuOpacityRow, menuBlurRow])
+        let paneFinderCal = makePaneView([
+            header("Finder"),
+            finderBox, finderDesktopBox, finderIconRow,
+            header("Kalender"),
+            eventsBox, eventsStatus, calendarList])
+        let paneWartung = makePaneView([
+            header("Sichern & Wiederherstellen"), backupRow,
+            header("Dock"), dockPinsButton,
+            updHeader, updInfoLabel, updVersionRow, updDevBox, updButtonsRow, updAutoBox])
+
+        allSections = [
+            PaneSection(id: "allgemein", title: "Allgemein", icon: "gearshape",
+                        keywords: "verhalten autostart anmelden bildschirme ausblenden dock reservieren bedienungshilfen", view: paneAllgemein),
+            PaneSection(id: "taskleiste", title: "Taskleiste", icon: "menubar.rectangle",
+                        keywords: "profil stil vista windows 7 11 farbmodus hell dunkel hoehe höhe icon breite orb abstand volle hover glow schimmer vorschau dockdoor acryl ausrichtung", view: paneTaskbar),
+            PaneSection(id: "startmenu", title: "Startmenü", icon: "square.grid.2x2",
+                        keywords: "start symbol orb menü stil editor tastenkuerzel kürzel hotkey", view: paneStart),
+            PaneSection(id: "infobereich", title: "Infobereich", icon: "bell",
+                        keywords: "tray symbolgroesse größe abstand reihenfolge flagge benachrichtigung netzwerk akku lautstaerke lautstärke cpu ram medien uhr sekunden wlan", view: paneTray),
+            PaneSection(id: "transparenz", title: "Transparenz", icon: "circle.lefthalf.filled",
+                        keywords: "transparenz deckkraft unschaerfe unschärfe glas blur startmenü", view: paneGlass),
+            PaneSection(id: "finderkal", title: "Finder & Kalender", icon: "folder",
+                        keywords: "finder fenster desktop symbol kalender termine", view: paneFinderCal),
+            PaneSection(id: "wartung", title: "Wartung", icon: "wrench.and.screwdriver",
+                        keywords: "sichern export import backup dock pins update version aktualisieren beenden", view: paneWartung),
+        ]
+        shownSections = allSections
+
+        // ---------- Seitenleiste (Suche + Liste) ----------
+        searchField.placeholderString = "Suchen"
+        searchField.delegate = self
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        sidebarTable.headerView = nil
+        sidebarTable.backgroundColor = .clear
+        sidebarTable.rowHeight = 30
+        sidebarTable.style = .sourceList
+        sidebarTable.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("s")))
+        sidebarTable.dataSource = self
+        sidebarTable.delegate = self
+        let sidebarScroll = NSScrollView()
+        sidebarScroll.documentView = sidebarTable
+        sidebarScroll.hasVerticalScroller = true
+        sidebarScroll.drawsBackground = false
+        sidebarScroll.borderType = .noBorder
+        sidebarScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        let sidebar = NSVisualEffectView()
+        sidebar.material = .sidebar
+        sidebar.blendingMode = .behindWindow
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.addSubview(searchField)
+        sidebar.addSubview(sidebarScroll)
+
+        // ---------- Footer (Version · Zurücksetzen · Beenden) ----------
+        let info = UpdateManager.currentInfo()
+        versionLabel.stringValue = "v\(info.version)" + (info.shortCommit.map { " (\($0))" } ?? "")
+        versionLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        versionLabel.textColor = .secondaryLabelColor
+        let resetButton = NSButton(title: "Auf Standard zurücksetzen", target: self, action: #selector(resetAllSettings))
+        resetButton.bezelStyle = .rounded
         let quit = NSButton(title: "Taskleiste beenden", target: self, action: #selector(quitAction))
         quit.bezelStyle = .rounded
-        quit.translatesAutoresizingMaskIntoConstraints = false
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        let footer = NSStackView(views: [versionLabel, spacer, resetButton, quit])
+        footer.orientation = .horizontal
+        footer.spacing = 8
+        footer.translatesAutoresizingMaskIntoConstraints = false
 
-        let content = NSView()
-        content.addSubview(tabView)
-        content.addSubview(quit)
+        contentContainer.translatesAutoresizingMaskIntoConstraints = false
+        let sep = NSBox(); sep.boxType = .separator; sep.translatesAutoresizingMaskIntoConstraints = false
+
+        let root = NSView()
+        root.addSubview(sidebar)
+        root.addSubview(sep)
+        root.addSubview(contentContainer)
+        root.addSubview(footer)
         NSLayoutConstraint.activate([
-            tabView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
-            tabView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            tabView.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
-            quit.topAnchor.constraint(equalTo: tabView.bottomAnchor, constant: 14),
-            quit.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
-            quit.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+            sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            sidebar.topAnchor.constraint(equalTo: root.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: 200),
+            searchField.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
+            searchField.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -10),
+            searchField.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 12),
+            sidebarScroll.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 6),
+            sidebarScroll.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -6),
+            sidebarScroll.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 8),
+            sidebarScroll.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -8),
+
+            sep.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            sep.topAnchor.constraint(equalTo: root.topAnchor),
+            sep.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            sep.widthAnchor.constraint(equalToConstant: 1),
+
+            contentContainer.leadingAnchor.constraint(equalTo: sep.trailingAnchor),
+            contentContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            contentContainer.topAnchor.constraint(equalTo: root.topAnchor),
+            contentContainer.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -8),
+
+            footer.leadingAnchor.constraint(equalTo: sep.trailingAnchor, constant: 14),
+            footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
         ])
-        w.contentView = content
+
+        w.contentView = root
+        w.setFrameAutosaveName("Win7TaskbarSettings")
+        if !w.setFrameUsingName("Win7TaskbarSettings") { w.center() }
         window = w
+
+        sidebarTable.reloadData()
+        selectSection(id: UserDefaults.standard.string(forKey: "settingsLastPane") ?? "allgemein")
     }
 
-    /// A tab whose content scrolls vertically, so nothing is cut off when a tab holds more rows
-    /// than the window is tall.
-    private func makeTab(_ title: String, _ views: [NSView]) -> NSTabViewItem {
-        let item = NSTabViewItem(identifier: title)
-        item.label = title
+    /// A bold section header used to group rows inside a tab.
+    private func header(_ s: String) -> NSTextField {
+        let l = NSTextField(labelWithString: s)
+        l.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        return l
+    }
+
+    /// A scrollable pane holding a vertical stack of rows (nothing is cut off when it is taller than
+    /// the window).
+    private func makePaneView(_ views: [NSView]) -> NSView {
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -471,8 +598,98 @@ final class SettingsWindowController: NSObject {
             stack.trailingAnchor.constraint(lessThanOrEqualTo: doc.trailingAnchor, constant: -16),
             stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -16),
         ])
-        item.view = v
-        return item
+        return v
+    }
+
+    // MARK: - Sidebar navigation
+
+    func numberOfRows(in tableView: NSTableView) -> Int { shownSections.count }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let s = shownSections[row]
+        let id = NSUserInterfaceItemIdentifier("sidecell")
+        let cell = (tableView.makeView(withIdentifier: id, owner: self) as? NSTableCellView) ?? {
+            let c = NSTableCellView(); c.identifier = id
+            let iv = NSImageView(); iv.translatesAutoresizingMaskIntoConstraints = false
+            let tf = NSTextField(labelWithString: ""); tf.translatesAutoresizingMaskIntoConstraints = false
+            tf.lineBreakMode = .byTruncatingTail
+            c.addSubview(iv); c.addSubview(tf); c.imageView = iv; c.textField = tf
+            NSLayoutConstraint.activate([
+                iv.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 6),
+                iv.centerYAnchor.constraint(equalTo: c.centerYAnchor),
+                iv.widthAnchor.constraint(equalToConstant: 18),
+                iv.heightAnchor.constraint(equalToConstant: 18),
+                tf.leadingAnchor.constraint(equalTo: iv.trailingAnchor, constant: 8),
+                tf.centerYAnchor.constraint(equalTo: c.centerYAnchor),
+                tf.trailingAnchor.constraint(lessThanOrEqualTo: c.trailingAnchor, constant: -6),
+            ])
+            return c
+        }()
+        cell.imageView?.image = NSImage(systemSymbolName: s.icon, accessibilityDescription: nil)
+        cell.textField?.stringValue = s.title
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        let r = sidebarTable.selectedRow
+        guard r >= 0, r < shownSections.count else { return }
+        showPane(shownSections[r])
+        UserDefaults.standard.set(shownSections[r].id, forKey: "settingsLastPane")
+    }
+
+    private func selectSection(id: String) {
+        let idx = shownSections.firstIndex(where: { $0.id == id }) ?? 0
+        guard idx < shownSections.count else { return }
+        sidebarTable.selectRowIndexes([idx], byExtendingSelection: false)
+    }
+
+    private func showPane(_ s: PaneSection) {
+        guard s.view !== currentPane else { return }
+        currentPane?.removeFromSuperview()
+        let v = s.view
+        v.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.addSubview(v)
+        NSLayoutConstraint.activate([
+            v.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+            v.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+            v.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+            v.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
+        ])
+        currentPane = v
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard (obj.object as? NSSearchField) === searchField else { return }
+        searchChanged()
+    }
+
+    private func searchChanged() {
+        let q = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let prevID = (sidebarTable.selectedRow >= 0 && sidebarTable.selectedRow < shownSections.count)
+            ? shownSections[sidebarTable.selectedRow].id : nil
+        shownSections = q.isEmpty ? allSections
+            : allSections.filter { $0.title.lowercased().contains(q) || $0.keywords.lowercased().contains(q) }
+        sidebarTable.reloadData()
+        if let prevID, shownSections.contains(where: { $0.id == prevID }) {
+            selectSection(id: prevID)
+        } else if !shownSections.isEmpty {
+            sidebarTable.selectRowIndexes([0], byExtendingSelection: false)
+        }
+    }
+
+    @objc private func resetAllSettings() {
+        let a = NSAlert()
+        a.messageText = "Alle Einstellungen zurücksetzen?"
+        a.informativeText = "Setzt sämtliche Einstellungen auf den Standard zurück. Die Taskleiste wird danach neu gestartet."
+        a.addButton(withTitle: "Zurücksetzen")
+        a.addButton(withTitle: "Abbrechen")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        if let bid = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bid)
+            UserDefaults.standard.synchronize()
+        }
+        window?.close()
+        SettingsIO.relaunchApp()
     }
 
     private func makeSurfaceRow(_ title: String, _ slider: NSSlider,
