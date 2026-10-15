@@ -23,18 +23,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    private var rebuildWork: DispatchWorkItem?
+
     @objc private func screensChanged() {
-        rebuildForAllScreens()
+        // Plugging/unplugging a display fires this several times in quick succession, and the screen
+        // list can be momentarily empty or half-populated mid-reconfiguration. Debounce so we rebuild
+        // once, after the layout has settled — overlapping tear-downs/rebuilds were the crash.
+        rebuildWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.rebuildForAllScreens() }
+        rebuildWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     private func rebuildForAllScreens() {
-        controllers.forEach { $0.tearDown() }
-        controllers.removeAll()
-
         // The primary display (the one with the menu bar at origin 0,0) always gets a bar and
         // comes first; not NSScreen.main, which only tracks the screen of the active window.
         let screens = NSScreen.screens
+        // During reconfiguration the list can be transiently empty — keep the current bars rather
+        // than tearing everything down into nothing (the next notification rebuilds once settled).
         guard let primary = screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.main else { return }
+
+        controllers.forEach { $0.tearDown() }
+        controllers.removeAll()
         controllers.append(TaskbarController(screen: primary, isPrimary: true))
 
         // Secondary displays (mirrored ones share the primary frame and are skipped).

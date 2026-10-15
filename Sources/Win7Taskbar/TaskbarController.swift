@@ -54,6 +54,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private var items: [TaskbarItem] = []
     private var buttons: [TaskbarButton] = []
     private var clockTimer: Timer?
+    private var tornDown = false
     private var trayLeftX: CGFloat = 0
     private let hasBattery = SystemInfo.battery() != nil
     private var hotkeyMonitors: [Any] = []
@@ -987,6 +988,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private func stopAutoHideTimer() { autoHideTimer?.invalidate(); autoHideTimer = nil }
 
     private func autoHideTick() {
+        guard !tornDown else { stopAutoHideTimer(); return }
         guard autoHideEnabled else { stopAutoHideTimer(); return }
         let mouse = NSEvent.mouseLocation
         let sf = screen.frame
@@ -1540,7 +1542,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         // The Space transition can briefly still report full screen; re-check shortly after.
         if !fullscreen { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self, !self.isFullscreenActive() else { return }
+            guard let self, !self.tornDown, !self.isFullscreenActive() else { return }
             self.window.ignoresMouseEvents = false
             self.window.alphaValue = 1
             if !self.window.isVisible { self.window.orderFront(nil) }
@@ -1557,8 +1559,10 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     // MARK: - Teardown
 
     func tearDown() {
+        tornDown = true
         clockTimer?.invalidate()
         clockTimer = nil
+        stopAutoHideTimer()
         hotkeyMonitors.forEach { NSEvent.removeMonitor($0) }
         hotkeyMonitors.removeAll()
         NSWorkspace.shared.notificationCenter.removeObserver(self)

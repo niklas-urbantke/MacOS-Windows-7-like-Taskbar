@@ -148,7 +148,8 @@ final class NowPlayingView: NSView {
         guard infoRect.contains(p), let window else { return }
         // Toggle: the flyout leaves clicks on its anchor to us, so a second click closes it.
         let anchor = window.convertToScreen(convert(infoRect, to: nil))
-        Win11Flyouts.showMedia(anchor: anchor, screen: window.screen ?? NSScreen.main ?? NSScreen.screens[0])
+        guard let scr = window.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        Win11Flyouts.showMedia(anchor: anchor, screen: scr)
     }
 
     // MARK: - Drawing
