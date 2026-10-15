@@ -24,11 +24,17 @@ final class TaskbarButton: NSControl {
     /// Mouse is down without a drag yet (Win11: icon springs in until mouseUp).
     private var pressed = false
 
+    // Windows-7 "hot-track": a soft glow in the icon's own colour that follows the cursor on hover.
+    private var hoverX: CGFloat = 0
+    private var glowAlpha: CGFloat = 0
+    private var glowTimer: Timer?
+    private var cachedGlowColor: NSColor?
+
     init(item: TaskbarItem) {
         self.item = item
         super.init(frame: NSRect(x: 0, y: 0, width: Theme.buttonWidth, height: Theme.buttonHeight))
         let area = NSTrackingArea(rect: .zero,
-                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
                                   owner: self, userInfo: nil)
         addTrackingArea(area)
         toolTip = item.name
@@ -40,7 +46,9 @@ final class TaskbarButton: NSControl {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseEntered(with event: NSEvent) {
-        hovering = true; needsDisplay = true
+        hovering = true
+        hoverX = convert(event.locationInWindow, from: nil).x
+        if Theme.iconHoverEffect != "none" { animateGlow(to: 1) } else { needsDisplay = true }
         guard item.isRunning else { return }
         hoverTimer?.invalidate()
         let t = Timer(timeInterval: 0.35, repeats: false) { [weak self] _ in
@@ -50,10 +58,82 @@ final class TaskbarButton: NSControl {
         RunLoop.main.add(t, forMode: .common)
         hoverTimer = t
     }
+    override func mouseMoved(with event: NSEvent) {
+        // Only the cursor-following variant needs to react to movement.
+        guard hovering, !Theme.isWin11, Theme.iconHoverEffect == "glow" else { return }
+        hoverX = convert(event.locationInWindow, from: nil).x
+        needsDisplay = true
+    }
     override func mouseExited(with event: NSEvent) {
         hovering = false; needsDisplay = true
+        animateGlow(to: 0)
         hoverTimer?.invalidate(); hoverTimer = nil
         buttonDelegate?.taskbarButtonHoverEnded()
+    }
+
+    /// Eases `glowAlpha` toward `target` for a soft fade in/out of the hover glow.
+    private func animateGlow(to target: CGFloat) {
+        glowTimer?.invalidate()
+        guard !Theme.isWin11 else { glowAlpha = 0; needsDisplay = true; return }
+        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] tm in
+            guard let self else { tm.invalidate(); return }
+            let step: CGFloat = 0.14
+            if abs(self.glowAlpha - target) <= step {
+                self.glowAlpha = target; tm.invalidate(); self.glowTimer = nil
+            } else {
+                self.glowAlpha += self.glowAlpha < target ? step : -step
+            }
+            self.needsDisplay = true
+        }
+        RunLoop.main.add(t, forMode: .common)
+        glowTimer = t
+    }
+
+    /// A vivid, representative colour of the app icon, used for the hover glow (computed once).
+    private var glowColor: NSColor {
+        if let c = cachedGlowColor { return c }
+        let c = TaskbarButton.dominantColor(of: item.icon)
+        cachedGlowColor = c
+        return c
+    }
+
+    /// Averages the icon's non-transparent pixels, weighted toward vivid ones, then lifts saturation.
+    private static func dominantColor(of image: NSImage) -> NSColor {
+        let w = 18, h = 18
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 4 * w, bitsPerPixel: 32),
+              let ctx = NSGraphicsContext(bitmapImageRep: rep) else {
+            return NSColor(calibratedWhite: 1, alpha: 1)
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        image.draw(in: NSRect(x: 0, y: 0, width: w, height: h))
+        NSGraphicsContext.restoreGraphicsState()
+
+        var rT = 0.0, gT = 0.0, bT = 0.0, wgt = 0.0
+        for y in 0..<h {
+            for x in 0..<w {
+                guard let px = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                let a = px.alphaComponent
+                if a < 0.25 { continue }
+                var hue: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0, al: CGFloat = 0
+                px.getHue(&hue, saturation: &sat, brightness: &bri, alpha: &al)
+                // Favour saturated, mid-bright pixels; near-grey/black pixels barely count.
+                let weight = Double(a) * Double(0.12 + sat) * Double(bri)
+                rT += Double(px.redComponent) * weight
+                gT += Double(px.greenComponent) * weight
+                bT += Double(px.blueComponent) * weight
+                wgt += weight
+            }
+        }
+        guard wgt > 0 else { return NSColor(calibratedWhite: 1, alpha: 1) }
+        let base = NSColor(deviceRed: CGFloat(rT / wgt), green: CGFloat(gT / wgt),
+                           blue: CGFloat(bT / wgt), alpha: 1)
+        var hue: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0, al: CGFloat = 0
+        base.getHue(&hue, saturation: &sat, brightness: &bri, alpha: &al)
+        return NSColor(hue: hue, saturation: min(1, sat * 1.4 + 0.08),
+                       brightness: min(1, bri * 1.08 + 0.12), alpha: 1)
     }
 
     private func glassX(_ event: NSEvent) -> CGFloat {
@@ -198,6 +278,26 @@ final class TaskbarButton: NSControl {
         } else if running {
             Theme.runningFill.setFill(); path.fill()
             Theme.runningStroke.setStroke(); path.lineWidth = 1; path.stroke()
+        }
+
+        // Windows-7 hot-track glow: a soft radial light in the icon's own colour, under the cursor,
+        // added over the glass (and under the icon) so the button "strahlt" a bit while hovered.
+        let hoverEffect = Theme.iconHoverEffect
+        if glowAlpha > 0.01 && hoverEffect != "none" {
+            // "glow" follows the cursor; "glow-icon" sits centred on the icon.
+            let cx = hoverEffect == "glow-icon"
+                ? frontBox.midX
+                : min(max(frontBox.minX + 8, hoverX), frontBox.maxX - 8)
+            let cy = bounds.midY
+            let radius = bounds.height * 0.8
+            let c = glowColor
+            NSGraphicsContext.current?.saveGraphicsState()
+            path.addClip()   // keep the light inside this button
+            NSGraphicsContext.current?.compositingOperation = .plusLighter
+            NSGradient(colors: [c.withAlphaComponent(0.5 * glowAlpha), c.withAlphaComponent(0)])?
+                .draw(fromCenter: NSPoint(x: cx, y: cy), radius: 0,
+                      toCenter: NSPoint(x: cx, y: cy), radius: radius, options: [])
+            NSGraphicsContext.current?.restoreGraphicsState()
         }
 
         // Icon only — centred, no label (Win7 "small/combine" taskbar mode).

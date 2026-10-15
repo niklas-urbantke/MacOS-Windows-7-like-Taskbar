@@ -1094,6 +1094,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         Self.forAll { $0.applyBarHeight() }
     }
 
+    // Hover-Effekt der Taskleisten-Icons ("glow" = Win7-Farbschimmer, "none" = aus).
+    var iconHoverEffect: String { Theme.iconHoverEffect }
+    func setIconHoverEffect(_ v: String) {
+        UserDefaults.standard.set(v, forKey: "iconHoverEffect")
+        Self.forAll { $0.buttons.forEach { $0.needsDisplay = true } }
+    }
+
     // Icon-Rahmen über volle Höhe.
     var fullHeightIcons: Bool { UserDefaults.standard.bool(forKey: "fullHeightIcons") }
     func setFullHeightIcons(_ on: Bool) {

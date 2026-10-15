@@ -61,6 +61,13 @@ final class SettingsWindowController: NSObject {
     private let previewModes: [(label: String, value: String)] = [
         ("DockDoor", "dockdoor"), ("Eigene Vorschau", "builtin"), ("Aus", "off")]
 
+    // Hover-Effekt der Taskleisten-Icons (erweiterbar um weitere Verhaltensweisen).
+    private let hoverEffectPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let hoverEffects: [(label: String, value: String)] = [
+        ("Farbschimmer (folgt Maus)", "glow"),
+        ("Farbschimmer (um das Icon)", "glow-icon"),
+        ("Aus", "none")]
+
     // Kalender-Termine (EventKit): Schalter, Hinweis und Kalenderauswahl.
     private let eventsBox = NSButton(checkboxWithTitle: "Termine im Kalender der Uhr anzeigen", target: nil, action: nil)
     private let eventsStatus = NSTextField(wrappingLabelWithString: "")
@@ -344,13 +351,22 @@ final class SettingsWindowController: NSObject {
         let previewRow = NSStackView(views: [NSTextField(labelWithString: "Fenstervorschau:"), previewPopup, previewHint])
         previewRow.orientation = .horizontal
         previewRow.spacing = 8
-        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, appearanceRow, previewRow, orbRow, styleRow, heightRow, iconWidthRow, orbGapRow, fullHeightBox,
+
+        hoverEffectPopup.removeAllItems()
+        hoverEffectPopup.addItems(withTitles: hoverEffects.map { $0.label })
+        hoverEffectPopup.target = self
+        hoverEffectPopup.action = #selector(hoverEffectChanged)
+        let hoverRow = NSStackView(views: [NSTextField(labelWithString: "Icon-Hover-Effekt:"), hoverEffectPopup])
+        hoverRow.orientation = .horizontal
+        hoverRow.spacing = 8
+
+        tabView.addTabViewItem(makeTab("Darstellung", [tbStyleRow, appearanceRow, previewRow, hoverRow, orbRow, styleRow, heightRow, iconWidthRow, orbGapRow, fullHeightBox,
                                                        win11Header, win11Row, acrylicGrid, resetAcrylic]))
         tabView.addTabViewItem(makeTab("Transparenz",
                                        [tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
                                         menuHeader, menuOpacityRow, menuBlurRow]))
         classicOnlyControls = [orbPopup, addButton, folderButton, menuStylePopup, menuEditButton, fullHeightBox, wifiBox,
-                               flagBox, trayIconSizeSlider, trayGapSlider,
+                               flagBox, trayIconSizeSlider, trayGapSlider, hoverEffectPopup,
                                taskbarOpacitySlider, taskbarBlurSlider, win7GlassSlider,
                                menuOpacitySlider, menuBlurSlider]
         let traySizeHeader = NSTextField(labelWithString: "Größe & Positionierung")
@@ -515,6 +531,9 @@ final class SettingsWindowController: NSObject {
         if let idx = previewModes.firstIndex(where: { $0.value == c.previewMode }) {
             previewPopup.selectItem(at: idx)
         }
+        if let idx = hoverEffects.firstIndex(where: { $0.value == c.iconHoverEffect }) {
+            hoverEffectPopup.selectItem(at: idx)
+        }
         // DockDoor only selectable when installed.
         previewPopup.item(at: 0)?.isEnabled = Theme.isDockDoorInstalled
         previewPopup.autoenablesItems = false
@@ -663,6 +682,12 @@ final class SettingsWindowController: NSObject {
         let i = previewPopup.indexOfSelectedItem
         guard i >= 0, i < previewModes.count else { return }
         controller?.setPreviewMode(previewModes[i].value)
+    }
+
+    @objc private func hoverEffectChanged() {
+        let i = hoverEffectPopup.indexOfSelectedItem
+        guard i >= 0, i < hoverEffects.count else { return }
+        controller?.setIconHoverEffect(hoverEffects[i].value)
     }
 
     @objc private func matchDockSize() {

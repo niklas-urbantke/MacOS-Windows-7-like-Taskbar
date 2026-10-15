@@ -30,6 +30,10 @@ enum Theme {
     }
     static var buttonWidth: CGFloat { s(iconWidthValue) }
 
+    /// Hover behaviour of the taskbar icons (classic Vista/Win7 profiles). Extensible; "glow" is the
+    /// Windows-7 colour hot-track, "none" disables it. Default: glow.
+    static var iconHoverEffect: String { UserDefaults.standard.string(forKey: "iconHoverEffect") ?? "glow" }
+
     // Configurable gap between the Start orb and the first icon (px, scaled). Default 20.
     static let defaultOrbGap: CGFloat = 20
     static var orbGapValue: CGFloat {
