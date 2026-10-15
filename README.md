@@ -1,5 +1,68 @@
 # Windows 7 Taskbar für macOS
 
+## Microsoft® Windows™ ist eine eingetragene Marke der Microsoft® Corporation. Der Name wird ausschließlich zu Referenzzwecken verwendet und erhebt keinerlei Anspruch auf Urheber- oder Markenrechte von Microsoft. Microsoft © 2026, alle Rechte vorbehalten. Alle Windows-Ressourcen (Logos, Orbs, Symbole, Schriften) gehören der Microsoft Corporation.
+
+> Dieses Projekt ist ein privater, nicht-kommerzieller optischer Nachbau und steht in **keiner Verbindung
+> zu Microsoft**. Es wird nicht von Microsoft unterstützt, geprüft oder gesponsert. Die Software wird
+> **„wie besehen“ ohne jegliche Gewährleistung** bereitgestellt — Nutzung auf eigene Gefahr.
+>
+> Grafiken, Symbole und Glas-Parameter aus [AeroThemePlasma](https://gitgud.io/wackyideas/aerothemeplasma)
+> sind urheberrechtlich geschützt und stehen unter der **AGPL-3.0**; ihre Rechte liegen bei den
+> jeweiligen Autorinnen und Autoren. Segoe UI ist von Microsoft lizenziert und wird nicht mitgeliefert.
+
+## 💙 Danke, wackyideas!
+
+Dieses Projekt würde es in dieser Form nicht geben ohne **[wackyideas](https://gitgud.io/wackyideas)** und
+**[AeroThemePlasma](https://gitgud.io/wackyideas/aerothemeplasma)**.
+
+Mit unglaublich viel Geduld, Liebe zum Detail und über Jahre hinweg hat wackyideas Windows 7 bis auf
+den letzten Pixel auseinandergenommen und auf KDE Plasma wieder zusammengesetzt — hat Vorarbeit aus der
+Community zusammengetragen, weiterentwickelt und vieles selbst gebaut: das SevenStart-Menü, die
+SevenTasks-Taskleiste, das Seven-Black-Theme, den Aero-Glass-Blur samt DWM-Einfärbung und unzählige
+Kleinigkeiten, die erst zusammen dieses unverwechselbare Gefühl ergeben.
+Diese Arbeit ist das Fundament, auf dem das Startmenü, der Infobereich und die Glas-Optik hier aufbauen —
+die Maße stammen aus seiner QML, die Rahmen aus seinen SVGs, die Glasformel aus seinen Shadern.
+
+Das ist nicht einfach ein Theme, das ist etwas Großes. Ehrlich: Ich finde es einfach nur genial. 🙌
+
+Wer die Arbeit unterstützen möchte: [wackyideas auf Ko-fi](https://ko-fi.com/M4M2NJ9PJ) ☕
+
+### 🙏 Und ein riesiges Dankeschön an alle Mitwirkenden
+
+AeroThemePlasma ist Gemeinschaftswerk — und ohne all diese Menschen gäbe es auch dieses Projekt nicht.
+Ich danke euch allen von Herzen:
+
+- **[Souris-2d07](https://gitgud.io/souris)** — Cursor-Theme, Plymouth- und SDDM-Theme, KWin-Fensterdekoration,
+  die meisten KWin-C++-Effekte und viele weitere KWin-Funktionen
+- **[That Linux Dude Dominic Hayes](https://github.com/dominichayesferen)** — Sperrbildschirm und das Icon-Theme
+- **[catpswin56](https://gitgud.io/catpswin56/)** — SevenTasks, Lautstärkemixer, Gadgets-Menü, UAC-Dialog und
+  unzählige weitere Beiträge
+- **[kfh83](https://github.com/kfh83)**, **[TorutheRedFox](https://github.com/TorutheRedFox)** und
+  **[ALTaleX](https://github.com/ALTaleX531/dwm_colorization_calculator)** — sie haben herausgefunden, wie
+  Aero-Glas-Blur und DWM-Einfärbung exakt funktionieren; genau diese Formel steckt auch im Glas dieses Startmenüs
+- **[AngelBruni](https://github.com/angelbruni)** — zahlreiche SVG-Texturen, allen voran die Uhr
+- **[QuinceTart10](https://github.com/QuinceTart10)** und **[Gamer95875](https://github.com/Gamer95875)** — die Sound-Themes
+- **[furkrn](https://gitgud.io/furkrn)** — das [Plymouth-Theme](https://github.com/furkrn/PlymouthVista)
+- **[IcyGuidance](https://gitgud.io/IcyGuidance)** — das Design der Benachrichtigungs-Badges in SevenTasks
+- **[ricewind012](https://github.com/ricewind012/)** — der Windows-Header für die `.bashrc`
+- **[MondySpartan](https://www.deviantart.com/mondyspartan/art/Windows-10-Year-2010-Edition-1016859431)** — die
+  Inspiration für das Benachrichtigungs-Design
+
+Und an alle, deren Arbeit in AeroThemePlasma weiterlebt:
+**[Adhe](https://store.kde.org/p/1386465/)**, **[oKcerG](https://github.com/oKcerG/QuickBehaviors)** und
+**[SnoutBug](https://store.kde.org/p/1720532)**, die SevenStart — die Grundlage dieses Startmenüs — erst möglich
+gemacht haben; **[Mirko Gennari](https://store.kde.org/p/998614)**, **DrGordBord** und
+**[bionegative](https://www.pling.com/p/998823)** für Seven-Black; **DrGordBord** für das
+[Windows-7-Kvantum-Theme](https://store.kde.org/p/1679903); **Intika** für
+[Digital Clock Lite](https://store.kde.org/p/1225135/); **Zren** für
+[Win7 Show Desktop](https://store.kde.org/p/2151247); und **[taj-ny](https://github.com/taj-ny)** für
+[kwin-effects-forceblur](https://github.com/taj-ny/kwin-effects-forceblur).
+
+Danke, dass ihr Windows 7 so viel Liebe schenkt. 💙
+Die vollständigen Credits stehen bei [AeroThemePlasma](https://gitgud.io/wackyideas/aerothemeplasma#credits).
+
+---
+
 Ein nativer **Dock-Ersatz für macOS** im Stil der Windows-7-Taskleiste — geschrieben in
 Swift/AppKit, ohne externe Abhängigkeiten. Aero-Glas-Optik, animierter Start-Orb, ein
 originalgetreues Windows-7-Startmenü, Fenstervorschau (Aero Peek), Fenstergruppierung,
@@ -46,7 +109,7 @@ System-Tray mit den Original-Symbolen und vieles mehr.
 Zwei Designs, umschaltbar unter *Einstellungen → Startmenü → Darstellung*:
 
 **Original (Windows 7)** — ein 1:1-Nachbau des *SevenStart*-Menüs aus
-[AeroThemePlasma](https://github.com/aeroshell-desktop/aerothemeplasma):
+[AeroThemePlasma](https://gitgud.io/wackyideas/aerothemeplasma):
 - Maße aus der Original-QML, Rahmen pixelgenau aus den Original-SVGs gerastert (gestochen scharf
   auf 1×- und Retina-Bildschirmen), skaliert mit der Taskleistenhöhe.
 - **Aero-Glas wie unter Windows 7**: leichter Blur und die DWM-Einfärbung „Sky“ wie im
@@ -219,11 +282,8 @@ ThemeResources/                        Grafiken (u. a. sm-* = Startmenü-Rahmen 
 
 ---
 
-## Lizenz & Danksagung
+## Lizenz
 
-Privates Projekt. Windows 7, Segoe UI und das Windows-Logo sind Marken bzw. Eigentum der
-Microsoft Corporation — dieses Projekt ist ein nicht-kommerzieller, optischer Nachbau ohne
-Verbindung zu Microsoft.
-
-Startmenü-Grafiken, Tray-Symbole und Glas-Parameter stammen aus bzw. orientieren sich an
-[AeroThemePlasma](https://github.com/aeroshell-desktop/aerothemeplasma) (wackyideas und Mitwirkende, AGPL-3.0).
+Privates, nicht-kommerzielles Projekt — siehe den Hinweis zu Microsoft und AeroThemePlasma
+[ganz oben](#windows-7-taskbar-für-macos). Danke an [wackyideas](#-danke-wackyideas) und [alle Mitwirkenden](#-und-ein-riesiges-dankeschön-an-alle-mitwirkenden)
+von AeroThemePlasma.
