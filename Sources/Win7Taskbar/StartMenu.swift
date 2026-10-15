@@ -433,27 +433,10 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         hide()
     }
 
-    private func openPath(_ path: String) {
-        StartMenuLaunch.openPath(path); hide()
-    }
-    private func openHome(_ sub: String) {
-        openPath((NSHomeDirectory() as NSString).appendingPathComponent(sub))
-    }
-    private func openURL(_ s: String) {
-        StartMenuLaunch.openURL(s); hide()
-    }
-    private func openSettings() {
-        openPath(StartMenuLaunch.systemSettingsPath)
-    }
-    private func openAppByID(_ id: String, fallback path: String) {
-        StartMenuLaunch.openApp(bundleID: id, fallback: path)
-        hide()
-    }
-
     // MARK: - Hover action icon (shown at the avatar spot)
 
     private func showActionIcon(_ action: MenuAction) {
-        hoverIcon.image = actionIcon(action)
+        hoverIcon.image = MenuActionRunner.icon(for: action)
         hoverIcon.isHidden = false
         avatar.isHidden = true
     }
@@ -462,88 +445,9 @@ final class StartMenuController: NSObject, NSTextFieldDelegate {
         avatar.isHidden = false
     }
 
-    /// A representative icon for an action (folder/app icon from the system, or an SF Symbol).
-    private func actionIcon(_ a: MenuAction) -> NSImage {
-        let ws = NSWorkspace.shared
-        let home = NSHomeDirectory()
-        func file(_ p: String) -> NSImage { ws.icon(forFile: p) }
-        func sym(_ n: String) -> NSImage {
-            NSImage(systemSymbolName: n, accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: 48, weight: .regular)) ?? NSImage()
-        }
-        switch a.kind {
-        case .home:            return file(home)
-        case .documents:       return file(home + "/Documents")
-        case .downloads:       return file(home + "/Downloads")
-        case .desktop:         return file(home + "/Desktop")
-        case .pictures:        return file(home + "/Pictures")
-        case .music:           return file(home + "/Music")
-        case .movies:          return file(home + "/Movies")
-        case .publicFolder:    return file(home + "/Public")
-        case .icloud:          return file(home + "/Library/Mobile Documents/com~apple~CloudDocs")
-        case .applications:    return file("/Applications")
-        case .utilities:       return file("/Applications/Utilities")
-        case .computer:        return file("/")
-        case .trash:           return file(home + "/.Trash")
-        case .openFolder:      return file(a.param ?? home)
-        case .openApp:         return a.param.map(file) ?? sym("app.fill")
-        case .openURL:         return NSWorkspace.shared.icon(forFileType: "public.url")
-        case .systemSettings:  return file("/System/Applications/System Settings.app")
-        case .activityMonitor: return file("/System/Applications/Utilities/Activity Monitor.app")
-        case .terminal:        return file("/System/Applications/Utilities/Terminal.app")
-        case .launchpad:       return file("/System/Applications/Launchpad.app")
-        case .missionControl:  return file("/System/Applications/Mission Control.app")
-        case .screenshot:      return file("/System/Applications/Utilities/Screenshot.app")
-        case .helpApple:       return sym("questionmark.circle.fill")
-        case .sleep:           return sym("moon.fill")
-        case .lock:            return sym("lock.fill")
-        case .logout:          return sym("rectangle.portrait.and.arrow.right.fill")
-        case .restart:         return sym("arrow.clockwise.circle.fill")
-        case .shutdown:        return sym("power.circle.fill")
-        }
-    }
-
     /// Execute a configurable Start-menu action (right column entries + avatar).
     func perform(_ action: MenuAction) {
-        let home = NSHomeDirectory()
-        switch action.kind {
-        case .home:            openPath(home)
-        case .documents:       openHome("Documents")
-        case .downloads:       openHome("Downloads")
-        case .desktop:         openHome("Desktop")
-        case .pictures:        openHome("Pictures")
-        case .music:           openHome("Music")
-        case .movies:          openHome("Movies")
-        case .publicFolder:    openHome("Public")
-        case .icloud:          openPath(home + "/Library/Mobile Documents/com~apple~CloudDocs")
-        case .applications:    openPath("/Applications")
-        case .utilities:       openPath("/Applications/Utilities")
-        case .computer:        openURL("file:///")
-        case .trash:           openPath(home + "/.Trash")
-        case .openFolder:      openPath(action.param ?? home)
-        case .openURL:         openURL(action.param ?? "")
-        case .openApp:
-            if let p = action.param {
-                NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: p), configuration: .init())
-            }
-            hide()
-        case .systemSettings:  openSettings()
-        case .activityMonitor: openAppByID("com.apple.ActivityMonitor", fallback: "/System/Applications/Utilities/Activity Monitor.app")
-        case .terminal:        openAppByID("com.apple.Terminal", fallback: "/System/Applications/Utilities/Terminal.app")
-        case .launchpad:       openPath("/System/Applications/Launchpad.app")
-        case .missionControl:  openPath("/System/Applications/Mission Control.app")
-        case .screenshot:      openPath("/System/Applications/Utilities/Screenshot.app")
-        case .helpApple:       openURL("https://support.apple.com/de-de")
-        case .sleep:           runOSA("tell application \"System Events\" to sleep")
-        case .lock:            runOSA("tell application \"System Events\" to keystroke \"q\" using {command down, control down}")
-        case .logout:          runOSA(StartMenuPower.Action.logout.script)
-        case .restart:         runOSA(StartMenuPower.Action.restart.script)
-        case .shutdown:        runOSA(StartMenuPower.Action.shutdown.script)
-        }
-    }
-
-    private func runOSA(_ command: String) {
-        StartMenuPower.runOSA(command)
+        MenuActionRunner.perform(action)
         hide()
     }
 

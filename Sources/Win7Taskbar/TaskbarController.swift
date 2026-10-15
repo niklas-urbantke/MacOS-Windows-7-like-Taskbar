@@ -42,7 +42,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let nowPlayingView = NowPlayingView(frame: .zero)
     private let wifiView = WifiView(frame: .zero)
     private let monitorView = HardwareMonitorView(frame: .zero)
-    private let startMenu = StartMenuController()
+    private let startMenuClassic = StartMenuController()
+    private let startMenu7 = StartMenu7Controller()
+    /// Vista/Win7 Start menu in use: the 1:1 SevenStart rebuild (default) or the earlier variant.
+    private var startMenu: ClassicStartMenu { Theme.startMenuDesign == "classic" ? startMenuClassic : startMenu7 }
+    private var classicMenus: [ClassicStartMenu] { [startMenuClassic, startMenu7] }
     private let startMenu11 = StartMenu11Controller()
     // Windows-11-Tray (ersetzt clock/volume/battery/wifi/monitor/nowPlaying im Win11-Profil).
     private let win11Clock = Win11ClockButton()
@@ -97,19 +101,20 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
         configureWindow(frame: frame)
         buildChrome()
-        startMenu.taskbarController = self
+        classicMenus.forEach { $0.taskbarController = self }
         startMenu11.taskbarController = self
 
         orb.target = self
         orb.action = #selector(toggleStart)
         orb.onRightClick = { [weak self] in self?.showOrbMenu() }
-        startMenu.onVisibilityChanged = { [weak self] open in
+        let classicVisibility: (Bool) -> Void = { [weak self] open in
             self?.orb.menuOpen = open
             if open {
                 Win11Flyouts.closeAll()   // Startmenü und Medien-Flyout nie gleichzeitig
                 self?.closeOtherStartMenus()
             }
         }
+        classicMenus.forEach { $0.onVisibilityChanged = classicVisibility }
         startMenu11.onVisibilityChanged = { [weak self] open in
             self?.orb.menuOpen = open
             if open {
@@ -196,7 +201,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private func closeOtherStartMenus() {
         Self.forAll { c in
             guard c !== self else { return }
-            c.startMenu.hide()
+            c.classicMenus.forEach { $0.hide() }
             c.startMenu11.hide()
         }
     }
@@ -1113,6 +1118,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         Self.forAll { $0.buttons.forEach { $0.needsDisplay = true } }
     }
 
+    // Startmenü-Darstellung: "original" (1:1 SevenStart) oder "classic" (bisherige Variante).
+    var startMenuDesign: String { Theme.startMenuDesign }
+    func setStartMenuDesign(_ v: String) {
+        UserDefaults.standard.set(v, forKey: "startMenuDesign")
+        Self.forAll { c in c.classicMenus.forEach { $0.hide() } }
+    }
+
     // Startmenü-Stil: "accent" (Akzentfarbe) oder "aero" (Taskbar-Glas).
     var menuStyle: String { UserDefaults.standard.string(forKey: "menuStyle") ?? "accent" }
     func setMenuStyle(_ style: String) { UserDefaults.standard.set(style, forKey: "menuStyle") }
@@ -1122,7 +1134,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     func openMenuEditor() {
         if Self.menuEditor == nil {
             let editor = MenuEditorWindowController()
-            editor.onChange = { Self.forAll { $0.startMenu.reloadRightColumn() } }
+            editor.onChange = { Self.forAll { c in c.classicMenus.forEach { $0.reloadRightColumn() } } }
             Self.menuEditor = editor
         }
         Self.menuEditor?.show()
@@ -1155,7 +1167,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
     /// Applies a changed style profile to this taskbar (menus of the old profile close).
     private func applyStyleChange() {
-        startMenu.hide()
+        classicMenus.forEach { $0.hide() }
         startMenu11.hide()
         hidePreviews()
         applyAppearance()
@@ -1216,7 +1228,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     /// (in jedem Profil, auch das gerade nicht sichtbare Startmenü bleibt so aktuell).
     private func applyColorModeChange() {
         applyWin11Change()
-        startMenu.applyAppearance()
+        classicMenus.forEach { $0.applyAppearance() }
         volumePopover.appearance = Theme.nsAppearance
     }
 
@@ -1271,10 +1283,10 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     var menuBlur: CGFloat { Theme.menuBlur }
     var menuOpacity: CGFloat { Theme.menuOpacity }
     func setMenuBlur(_ v: CGFloat) {
-        UserDefaults.standard.set(Double(v), forKey: "menuBlur"); Self.forAll { $0.startMenu.applyAppearance() }
+        UserDefaults.standard.set(Double(v), forKey: "menuBlur"); Self.forAll { c in c.classicMenus.forEach { $0.applyAppearance() } }
     }
     func setMenuOpacity(_ v: CGFloat) {
-        UserDefaults.standard.set(Double(v), forKey: "menuOpacity"); Self.forAll { $0.startMenu.applyAppearance() }
+        UserDefaults.standard.set(Double(v), forKey: "menuOpacity"); Self.forAll { c in c.classicMenus.forEach { $0.applyAppearance() } }
     }
 
     // Start-Orb-Auswahl.
@@ -1580,7 +1592,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
         NotificationCenter.default.removeObserver(self)
-        startMenu.hide()
+        classicMenus.forEach { $0.hide() }
         startMenu11.hide()
         Win11Flyouts.closeAll()
         preview.scheduleHide()
