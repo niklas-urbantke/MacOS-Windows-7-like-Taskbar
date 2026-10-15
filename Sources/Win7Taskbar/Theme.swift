@@ -33,6 +33,9 @@ enum Theme {
     /// Hover behaviour of the taskbar icons (classic Vista/Win7 profiles). Extensible; "glow" is the
     /// Windows-7 colour hot-track, "none" disables it. Default: glow.
     static var iconHoverEffect: String { UserDefaults.standard.string(forKey: "iconHoverEffect") ?? "glow" }
+    /// Start menu of the Vista/Win7 profiles: "original" = 1:1 AeroThemePlasma SevenStart rebuild,
+    /// "classic" = the earlier, freely styled variant.
+    static var startMenuDesign: String { UserDefaults.standard.string(forKey: "startMenuDesign") ?? "original" }
     /// Colour the hover glow of not-running (pinned/closed) apps too. Off = a neutral white glow for
     /// them; running apps always glow in their icon colour. Default: on.
     static var glowColorForClosed: Bool {

@@ -31,6 +31,9 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     private let orbPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private var orbs: [(label: String, file: String)] = []
     private let menuStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let menuDesignPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let menuDesigns: [(label: String, value: String)] = [("Original (Windows 7)", "original"),
+                                                                 ("Bisherige Variante", "classic")]
     private let menuStyles: [(label: String, value: String)] = [("Akzentfarbe", "accent"), ("Taskbar (Aero)", "aero")]
     private let heightSlider = NSSlider(frame: .zero)
     private let heightLabel = NSTextField(labelWithString: "")
@@ -152,7 +155,17 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         menuStylePopup.action = #selector(menuStyleChanged)
         let menuEditButton = NSButton(title: "Rechte Spalte bearbeiten…", target: self, action: #selector(openMenuEditor))
         menuEditButton.bezelStyle = .rounded
-        let styleRow = NSStackView(views: [NSTextField(labelWithString: "Startmenü-Stil:"), menuStylePopup, menuEditButton])
+        menuDesignPopup.removeAllItems()
+        menuDesignPopup.addItems(withTitles: menuDesigns.map { $0.label })
+        menuDesignPopup.target = self
+        menuDesignPopup.action = #selector(menuDesignChanged)
+        let designHint = NSTextField(labelWithString: "Original = 1:1 nach AeroThemePlasma (SevenStart).")
+        designHint.textColor = .secondaryLabelColor
+        designHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let designRow = NSStackView(views: [NSTextField(labelWithString: "Darstellung:"), menuDesignPopup, designHint])
+        designRow.orientation = .horizontal
+        designRow.spacing = 8
+        let styleRow = NSStackView(views: [NSTextField(labelWithString: "Stil (bisherige Variante):"), menuStylePopup, menuEditButton])
         styleRow.orientation = .horizontal
         styleRow.spacing = 8
 
@@ -407,7 +420,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         win11Hint.textColor = .secondaryLabelColor
         win11Hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
 
-        classicOnlyControls = [orbPopup, addButton, folderButton, menuStylePopup, menuEditButton, fullHeightBox, wifiBox,
+        classicOnlyControls = [orbPopup, addButton, folderButton, menuStylePopup, menuDesignPopup, menuEditButton, fullHeightBox, wifiBox,
                                flagBox, trayIconSizeSlider, trayGapSlider, hoverEffectPopup, glowClosedBox,
                                taskbarOpacitySlider, taskbarBlurSlider, win7GlassSlider,
                                menuOpacitySlider, menuBlurSlider]
@@ -430,7 +443,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         ])
         let paneStart = makePaneView([
             header("Start-Symbol"), orbRow,
-            header("Menü"), styleRow,
+            header("Menü"), designRow, styleRow,
             header("Tastenkürzel"), hotkeyRow,
         ])
         let paneTray = makePaneView([traySizeHeader, trayIconSizeRow, trayGapRow,
@@ -456,7 +469,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
             PaneSection(id: "taskleiste", title: "Taskleiste", icon: "menubar.rectangle",
                         keywords: "profil stil vista windows 7 11 farbmodus hell dunkel hoehe höhe icon breite orb abstand volle hover glow schimmer vorschau dockdoor acryl ausrichtung", view: paneTaskbar),
             PaneSection(id: "startmenu", title: "Startmenü", icon: "square.grid.2x2",
-                        keywords: "start symbol orb menü stil editor tastenkuerzel kürzel hotkey", view: paneStart),
+                        keywords: "start symbol orb menü stil darstellung original bisherige editor tastenkuerzel kürzel hotkey", view: paneStart),
             PaneSection(id: "infobereich", title: "Infobereich", icon: "bell",
                         keywords: "tray symbolgroesse größe abstand reihenfolge flagge benachrichtigung netzwerk akku lautstaerke lautstärke cpu ram medien uhr sekunden wlan", view: paneTray),
             PaneSection(id: "transparenz", title: "Transparenz", icon: "circle.lefthalf.filled",
@@ -773,6 +786,9 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         if let idx = orbs.firstIndex(where: { $0.file == c.selectedOrbFile }) {
             orbPopup.selectItem(at: idx)
         }
+        if let idx = menuDesigns.firstIndex(where: { $0.value == c.startMenuDesign }) {
+            menuDesignPopup.selectItem(at: idx)
+        }
         if let idx = menuStyles.firstIndex(where: { $0.value == c.menuStyle }) {
             menuStylePopup.selectItem(at: idx)
         }
@@ -832,6 +848,8 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         // Profile-specific controls: Win11 options only in the Win11 profile, the classic ones otherwise.
         let win11 = c.taskbarStyle == "win11"
         classicOnlyControls.forEach { $0.isEnabled = !win11 }
+        menuStylePopup.isEnabled = !win11 && c.startMenuDesign == "classic"   // gilt nur für die bisherige Variante
+        [menuOpacitySlider, menuBlurSlider].forEach { $0.isEnabled = !win11 && c.startMenuDesign == "classic" }   // Original: feste Aero-Werte
         [win11AlignmentPopup, win11AcrylicBox].forEach { $0.isEnabled = win11 }   // Farbmodus gilt für alle Profile
         (frostSliders + tintSliders).forEach { $0.isEnabled = win11 && c.win11Acrylic }
     }
@@ -1081,6 +1099,13 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
             if let c = chars, !c.isEmpty, c != " " { return c.uppercased() }
             return "Taste \(keyCode)"
         }
+    }
+
+    @objc private func menuDesignChanged() {
+        let i = menuDesignPopup.indexOfSelectedItem
+        guard i >= 0, i < menuDesigns.count else { return }
+        controller?.setStartMenuDesign(menuDesigns[i].value)
+        syncFromController()
     }
 
     @objc private func menuStyleChanged() {

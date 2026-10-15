@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// An action that a Start-menu entry (or the avatar) can trigger.
 /// `param` carries the folder path / URL / app path for the three parameterised kinds.
@@ -154,6 +155,93 @@ enum MenuEntryStore {
     static func saveAvatar(_ a: MenuAction) {
         if let data = try? JSONEncoder().encode(a) {
             UserDefaults.standard.set(data, forKey: avatarKey)
+        }
+    }
+}
+
+// MARK: - Running actions (shared by both classic Start menus)
+
+enum MenuActionRunner {
+    /// Runs a configurable Start-menu action (right-column entries and the avatar).
+    /// The caller closes the menu afterwards.
+    static func perform(_ action: MenuAction) {
+        let home = NSHomeDirectory()
+        func open(_ path: String) { StartMenuLaunch.openPath(path) }
+        switch action.kind {
+        case .home:            open(home)
+        case .documents:       open(home + "/Documents")
+        case .downloads:       open(home + "/Downloads")
+        case .desktop:         open(home + "/Desktop")
+        case .pictures:        open(home + "/Pictures")
+        case .music:           open(home + "/Music")
+        case .movies:          open(home + "/Movies")
+        case .publicFolder:    open(home + "/Public")
+        case .icloud:          open(home + "/Library/Mobile Documents/com~apple~CloudDocs")
+        case .applications:    open("/Applications")
+        case .utilities:       open("/Applications/Utilities")
+        case .computer:        StartMenuLaunch.openURL("file:///")
+        case .trash:           open(home + "/.Trash")
+        case .openFolder:      open(action.param ?? home)
+        case .openURL:         StartMenuLaunch.openURL(action.param ?? "")
+        case .openApp:
+            if let p = action.param {
+                NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: p), configuration: .init())
+            }
+        case .systemSettings:  open(StartMenuLaunch.systemSettingsPath)
+        case .activityMonitor: StartMenuLaunch.openApp(bundleID: "com.apple.ActivityMonitor",
+                                                       fallback: "/System/Applications/Utilities/Activity Monitor.app")
+        case .terminal:        StartMenuLaunch.openApp(bundleID: "com.apple.Terminal",
+                                                       fallback: "/System/Applications/Utilities/Terminal.app")
+        case .launchpad:       open("/System/Applications/Launchpad.app")
+        case .missionControl:  open("/System/Applications/Mission Control.app")
+        case .screenshot:      open("/System/Applications/Utilities/Screenshot.app")
+        case .helpApple:       StartMenuLaunch.openURL("https://support.apple.com/de-de")
+        case .sleep:           StartMenuPower.run(.sleep)
+        case .lock:            StartMenuPower.runOSA("tell application \"System Events\" to keystroke \"q\" using {command down, control down}")
+        case .logout:          StartMenuPower.run(.logout)
+        case .restart:         StartMenuPower.run(.restart)
+        case .shutdown:        StartMenuPower.run(.shutdown)
+        }
+    }
+
+    /// A representative icon for an action (folder/app icon from the system, or an SF Symbol).
+    static func icon(for a: MenuAction) -> NSImage {
+        let ws = NSWorkspace.shared
+        let home = NSHomeDirectory()
+        func file(_ p: String) -> NSImage { ws.icon(forFile: p) }
+        func sym(_ n: String) -> NSImage {
+            NSImage(systemSymbolName: n, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 48, weight: .regular)) ?? NSImage()
+        }
+        switch a.kind {
+        case .home:            return file(home)
+        case .documents:       return file(home + "/Documents")
+        case .downloads:       return file(home + "/Downloads")
+        case .desktop:         return file(home + "/Desktop")
+        case .pictures:        return file(home + "/Pictures")
+        case .music:           return file(home + "/Music")
+        case .movies:          return file(home + "/Movies")
+        case .publicFolder:    return file(home + "/Public")
+        case .icloud:          return file(home + "/Library/Mobile Documents/com~apple~CloudDocs")
+        case .applications:    return file("/Applications")
+        case .utilities:       return file("/Applications/Utilities")
+        case .computer:        return file("/")
+        case .trash:           return file(home + "/.Trash")
+        case .openFolder:      return file(a.param ?? home)
+        case .openApp:         return a.param.map(file) ?? sym("app.fill")
+        case .openURL:         return ws.icon(for: .internetShortcut)
+        case .systemSettings:  return file("/System/Applications/System Settings.app")
+        case .activityMonitor: return file("/System/Applications/Utilities/Activity Monitor.app")
+        case .terminal:        return file("/System/Applications/Utilities/Terminal.app")
+        case .launchpad:       return file("/System/Applications/Launchpad.app")
+        case .missionControl:  return file("/System/Applications/Mission Control.app")
+        case .screenshot:      return file("/System/Applications/Utilities/Screenshot.app")
+        case .helpApple:       return sym("questionmark.circle.fill")
+        case .sleep:           return sym("moon.fill")
+        case .lock:            return sym("lock.fill")
+        case .logout:          return sym("rectangle.portrait.and.arrow.right.fill")
+        case .restart:         return sym("arrow.clockwise.circle.fill")
+        case .shutdown:        return sym("power.circle.fill")
         }
     }
 }
