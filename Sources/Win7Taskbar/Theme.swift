@@ -2,6 +2,48 @@ import AppKit
 
 /// Central place for the Windows-7-ish metrics and colours so the look stays consistent.
 enum Theme {
+    /// Settings a fresh installation starts with (also what "Auf Standard zurücksetzen" returns to).
+    /// Registered in the registration domain, so every `object(forKey:) == nil ? … : …` fallback in
+    /// the code only applies to keys not listed here. Pins, hotkey and the classic menu's
+    /// transparency keep their built-in defaults.
+    static let installDefaults: [String: Any] = [
+        // Taskleiste
+        "taskbarStyle": "win7",
+        "win11Appearance": "dark",
+        "barHeight": 40.0,
+        "iconWidth": 89.0,
+        "orbGap": 0.0,
+        "fullHeightIcons": true,
+        "iconHoverEffect": "glow-icon",
+        "glowColorClosed": true,
+        "previewMode": "builtin",
+        "autoHide": false,
+        "reserveSpace": true,
+        // Transparenz
+        "taskbarBlur": 0.55,
+        "taskbarOpacity": 1.0,
+        "win7GlassStrength": 1.0,
+        // Startmenü
+        "orbFile": "orb_2.png",
+        "menuStyle": "aero",
+        // Infobereich
+        "trayIconSize": 24.0,
+        "traySize.battery": 20.0,
+        "trayOrder": ["monitor", "media", "flag", "network", "battery", "volume"],
+        "showMonitor": true,
+        "showNowPlaying": true,
+        "showWifi": true,
+        "clockSeconds": false,
+        // Finder & Kalender
+        "finderAlwaysNewWindow": false,
+        "hideFinderDesktop": true,
+        "calendarEvents": true,
+    ]
+
+    static func registerInstallDefaults() {
+        UserDefaults.standard.register(defaults: installDefaults)
+    }
+
     // The bar height is configurable; everything else scales relative to a reference of 60px.
     static let referenceHeight: CGFloat = 60
     static let minHeight: CGFloat = 40

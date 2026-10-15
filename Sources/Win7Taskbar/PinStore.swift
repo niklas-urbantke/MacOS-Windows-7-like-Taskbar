@@ -1,22 +1,33 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// Persists pinned apps (by bundle identifier or path) across launches.
 enum PinStore {
     private static let key = "pinnedApps"
     /// Bundle ids already taken over from the Dock (so a pin released here does not come back).
     private static let importedKey = "dockPinsImported"
-    // Sensible Win7-like defaults the first time the app runs.
-    private static let defaults = [
-        "com.apple.finder",
-        "com.apple.Safari",
-        "com.apple.mail",
-    ]
+    /// Windows-7-like defaults the first time the app runs (Explorer, Internet Explorer, Media
+    /// Player): Finder, the default browser and the default media player.
+    private static var defaults: [String] {
+        let ws = NSWorkspace.shared
+        func bundleID(_ url: URL?) -> String? { url.flatMap { Bundle(url: $0)?.bundleIdentifier } }
+        let browser = bundleID(ws.urlForApplication(toOpen: URL(string: "https://example.com")!)) ?? "com.apple.Safari"
+        let player = bundleID(ws.urlForApplication(toOpen: .mp3)) ?? "com.apple.Music"
+        var ids: [String] = []
+        for id in ["com.apple.finder", browser, player] where !ids.contains(id) { ids.append(id) }
+        return ids
+    }
 
     static func load() -> [String] {
         let ud = UserDefaults.standard
         if ud.object(forKey: key) == nil {
-            ud.set(defaults, forKey: key)
-            return defaults
+            let pins = defaults
+            ud.set(pins, forKey: key)
+            // Only these defaults: the Dock's current pins count as already offered, so the automatic
+            // import at launch only adds apps pinned to the Dock later ("Dock-Apps übernehmen" still
+            // takes over all of them).
+            if ud.object(forKey: importedKey) == nil { ud.set(dockPinnedBundleIDs(), forKey: importedKey) }
+            return pins
         }
         return ud.stringArray(forKey: key) ?? []
     }
@@ -54,11 +65,11 @@ enum PinStore {
     @discardableResult
     static func importDockPins(includeReleased: Bool) -> Bool {
         let ud = UserDefaults.standard
+        var keys = load()   // first: on the first run this also marks the Dock's current pins as offered
         let dockIDs = dockPinnedBundleIDs()
         guard !dockIDs.isEmpty else { return false }
 
         let imported = Set(ud.stringArray(forKey: importedKey) ?? [])
-        var keys = load()
         var changed = false
         for id in dockIDs where !keys.contains(id) && (includeReleased || !imported.contains(id)) {
             keys.append(id)
