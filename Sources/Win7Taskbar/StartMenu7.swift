@@ -7,8 +7,9 @@ import Collaboration
 // the menu together with the 40 px taskbar. The chrome comes from the original SVGs: every FrameSvg
 // piece is rendered onto the pixel grid (1× and @2x, ThemeResources/sm-*) and drawn at native pixel
 // size, so borders stay sharp; only the inner areas stretch. The glass follows the AeroGlassBlur
-// effect's defaults (aeroshell-kwin-components): uniform DWM colourisation "Sky" at intensity 107
-// plus the screen-space reflection texture at 75 % — no gradient.
+// effect (aeroshell-kwin-components, see AeroGlass.swift): uniform DWM colourisation in the window
+// colour from the settings (default "Himmel"/Sky at intensity 107) plus the screen-space reflection
+// texture at 75 % — no gradient.
 
 // MARK: - Assets
 
@@ -63,167 +64,6 @@ enum Menu7Assets {
         flip.concat()
         img.draw(in: rect, from: .zero, operation: .sourceOver, fraction: alpha)
         NSGraphicsContext.restoreGraphicsState()
-    }
-}
-
-/// Windows 7 DWM colourisation as implemented by AeroGlassBlur (advanced.frag + wackyfunc.h):
-/// result = colour·primary + colour·luma(backdrop)·afterglow + backdrop·blur.
-enum M7Glass {
-    /// Default colour "Sky" (#74b8fc) at slider position 0x6b = 107.
-    static let sky = NSColor(srgbRed: 0x74 / 255.0, green: 0xb8 / 255.0, blue: 0xfc / 255.0, alpha: 1)
-    static let defaultIntensity = 107
-
-    /// getColorBalances() from wackyfunc.h (ALTaleX's dwm_colorization_calculator): percentages.
-    static func balances(_ slider: Int) -> (primary: CGFloat, afterglow: CGFloat, blur: CGFloat) {
-        if slider == 0 { return (100, 0, 100) }
-        let balance = Int((Double(slider) / 255.0 - 0.1) / 0.75 * 100.0 + 10.0)
-        if balance < 50 { let b = 100 - balance; return (5, CGFloat(100 - 5 - b), CGFloat(b)) }
-        if balance < 95 { let a = 95 - balance, b = 50 - ((balance - 50) >> 1); return (CGFloat(100 - a - b), CGFloat(a), CGFloat(b)) }
-        return (CGFloat(balance - 25), 0, CGFloat(100 - (balance - 25)))
-    }
-
-    /// The colourisation as a uniform overlay over the blurred backdrop: alpha = 1 − blur balance,
-    /// colour = (primary + afterglow·L)/alpha · colour, with L the typical luma of the blurred backdrop.
-    static func overlay(intensity: Int, color: NSColor = sky, assumedLuma L: CGFloat = 0.4) -> NSColor {
-        let b = balances(intensity)
-        let a = max(0.01, 1 - b.blur / 100)
-        let f = (b.primary / 100 + b.afterglow / 100 * L) / a
-        let c = color.usingColorSpace(.sRGB) ?? color
-        return NSColor(srgbRed: min(1, c.redComponent * f), green: min(1, c.greenComponent * f),
-                       blue: min(1, c.blueComponent * f), alpha: a)
-    }
-
-    /// The exact colourisation as a 4×5 colour matrix applied to the blurred backdrop:
-    /// out = blur·B + afterglow·C·dot(B, (0.299, 0.587, 0.114)) + primary·C, alpha 1.
-    static func matrix(intensity: Int, color: NSColor = sky) -> [Float] {
-        let b = balances(intensity)
-        let c = color.usingColorSpace(.sRGB) ?? color
-        let C = [c.redComponent, c.greenComponent, c.blueComponent].map(Float.init)
-        let p = Float(b.primary / 100), a = Float(b.afterglow / 100), bl = Float(b.blur / 100)
-        let luma: [Float] = [0.299, 0.587, 0.114]
-        var m = [Float](repeating: 0, count: 20)
-        for row in 0..<3 {
-            for col in 0..<3 { m[row * 5 + col] = C[row] * a * luma[col] + (row == col ? bl : 0) }
-            m[row * 5 + 4] = C[row] * p
-        }
-        m[19] = 1
-        return m
-    }
-
-    /// BlurStrength 3 of AeroGlassBlur = dual Kawase, 2 iterations, offset 2.5 — about a
-    /// Gaussian with σ ≈ 3.9 px (measured on the shader's impulse response).
-    static let blurSigma: CGFloat = 3.9
-
-    /// Radius of the dialog frame's rounded top corners (its outline runs from (6,0) to (0,6)); the
-    /// glass must stay inside it so it doesn't show as a second corner.
-    static let cornerRadius: CGFloat = 6
-
-    /// Outline of the menu body: rounded top corners, square bottom (the dialog sits on the taskbar).
-    static func bodyPath(_ r: NSRect, radius: CGFloat, topIsMinY: Bool) -> CGPath {
-        let p = CGMutablePath()
-        let top = topIsMinY ? r.minY : r.maxY, bottom = topIsMinY ? r.maxY : r.minY
-        let inward: CGFloat = topIsMinY ? 1 : -1
-        p.move(to: CGPoint(x: r.minX, y: bottom))
-        p.addLine(to: CGPoint(x: r.minX, y: top + inward * radius))
-        p.addArc(tangent1End: CGPoint(x: r.minX, y: top), tangent2End: CGPoint(x: r.minX + radius, y: top), radius: radius)
-        p.addLine(to: CGPoint(x: r.maxX - radius, y: top))
-        p.addArc(tangent1End: CGPoint(x: r.maxX, y: top), tangent2End: CGPoint(x: r.maxX, y: top + inward * radius), radius: radius)
-        p.addLine(to: CGPoint(x: r.maxX, y: bottom))
-        p.closeSubpath()
-        return p
-    }
-}
-
-/// Behind-window glass like AeroGlassBlur: a window-server backdrop layer with the original's
-/// light blur and the DWM colour matrix — none of the macOS material's darkening fill/tone layers.
-/// Falls back to an NSVisualEffectView (plus the overlay approximation) if the backdrop layer
-/// class is unavailable.
-private final class M7Backdrop: NSView {
-    private let backdrop: CALayer?
-    private let fallback: NSVisualEffectView?
-    private let shape = CAShapeLayer()
-    var topRadius: CGFloat = M7Glass.cornerRadius { didSet { needsLayout = true } }
-    var usesFallback: Bool { backdrop == nil }
-
-    init() {
-        if let cls = NSClassFromString("CABackdropLayer") as? CALayer.Type {
-            let l = cls.init()
-            l.setValue(true, forKey: "windowServerAware")
-            backdrop = l; fallback = nil
-        } else {
-            let v = NSVisualEffectView()
-            v.material = .underWindowBackground
-            v.blendingMode = .behindWindow
-            v.state = .active
-            v.appearance = NSAppearance(named: .darkAqua)
-            backdrop = nil; fallback = v
-        }
-        super.init(frame: .zero)
-        wantsLayer = true
-        if let b = backdrop {
-            layer?.addSublayer(b)
-            b.mask = shape
-        } else if let v = fallback {
-            addSubview(v)
-        }
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    /// `sigma` in points (0 = no blur), `intensity` the colourisation slider (26…217).
-    func configure(sigma: CGFloat, intensity: Int, fallbackAlpha: CGFloat) {
-        guard let b = backdrop else { fallback?.alphaValue = fallbackAlpha; return }
-        var filters: [NSObject] = []
-        if sigma > 0.05, let blur = Self.filter("gaussianBlur") {
-            blur.setValue(sigma, forKey: "inputRadius")
-            blur.setValue(true, forKey: "inputNormalizeEdges")
-            filters.append(blur)
-        }
-        if let cm = Self.filter("colorMatrix") {
-            let m = M7Glass.matrix(intensity: intensity)
-            let value = m.withUnsafeBytes {
-                NSValue(bytes: $0.baseAddress!, objCType: "{CAColorMatrix=ffffffffffffffffffff}")
-            }
-            cm.setValue(value, forKey: "inputColorMatrix")
-            filters.append(cm)
-        }
-        b.filters = filters
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        needsLayout = true
-    }
-
-    override func layout() {
-        super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        backdrop?.frame = bounds
-        shape.frame = bounds
-        shape.path = M7Glass.bodyPath(bounds.insetBy(dx: 0.5, dy: 0.5), radius: topRadius, topIsMinY: isFlipped)
-        CATransaction.commit()
-        if let v = fallback {
-            v.frame = bounds
-            let r = topRadius
-            v.maskImage = NSImage(size: bounds.size, flipped: false) { rect in
-                NSColor.black.setFill()
-                let p = NSBezierPath()
-                p.move(to: NSPoint(x: rect.minX, y: rect.minY))
-                p.line(to: NSPoint(x: rect.maxX, y: rect.minY))
-                p.appendArc(from: NSPoint(x: rect.maxX, y: rect.maxY), to: NSPoint(x: rect.maxX - r, y: rect.maxY), radius: r)
-                p.appendArc(from: NSPoint(x: rect.minX, y: rect.maxY), to: NSPoint(x: rect.minX, y: rect.maxY - r), radius: r)
-                p.close()
-                p.fill()
-                return true
-            }
-        }
-    }
-
-    private static func filter(_ type: String) -> NSObject? {
-        guard let cls: AnyObject = NSClassFromString("CAFilter") else { return nil }
-        let sel = NSSelectorFromString("filterWithType:")
-        guard cls.responds(to: sel) else { return nil }
-        return cls.perform(sel, with: type)?.takeUnretainedValue() as? NSObject
     }
 }
 
@@ -325,9 +165,9 @@ private final class M7Chrome: M7FlippedView {
         let b = bounds
         guard b.width > 40, b.height > 40 else { return }   // not laid out yet
 
-        // Uniform Aero glass (no gradient). The colourisation normally lives in M7Backdrop's colour
+        // Uniform Aero glass (no gradient). The colourisation normally lives in AeroBackdropView's colour
         // matrix; `glass` is only the overlay fallback.
-        let shape = NSBezierPath(cgPath: M7Glass.bodyPath(b.insetBy(dx: 0.5, dy: 0.5), radius: M7Glass.cornerRadius, topIsMinY: true))
+        let shape = NSBezierPath(cgPath: AeroGlass.bodyPath(b.insetBy(dx: 0.5, dy: 0.5), radius: AeroGlass.cornerRadius, topIsMinY: true))
         glass.setFill()
         shape.fill()
 
@@ -652,7 +492,7 @@ final class StartMenu7Controller: NSObject, NSTextFieldDelegate {
     private let window: KeyableWindow
     private let root = M7FlippedView()
     private let body = M7FlippedView()
-    private let blur = M7Backdrop()
+    private let blur = AeroBackdropView()
     private let chrome = M7Chrome()
     private let listScroll = NSScrollView()
     private let listDoc = M7FlippedView()
@@ -768,11 +608,12 @@ final class StartMenu7Controller: NSObject, NSTextFieldDelegate {
 
     // MARK: Appearance
 
-    /// Glass with the AeroGlassBlur defaults (BlurStrength 3, colour "Sky" at intensity 107). The
-    /// transparency sliders in the settings belong to the classic menu and are not applied here.
+    /// Glass like AeroGlassBlur (BlurStrength 3) in the window colour from the settings (AeroColor,
+    /// default "Himmel" at intensity 107). The classic menu's transparency sliders don't apply here.
     func applyAppearance() {
-        blur.configure(sigma: M7Glass.blurSigma * k, intensity: M7Glass.defaultIntensity, fallbackAlpha: 1)
-        chrome.glass = blur.usesFallback ? M7Glass.overlay(intensity: M7Glass.defaultIntensity) : .clear
+        let spec = AeroColor.current
+        blur.configure(sigma: AeroGlass.blurSigma * k, spec: spec, fallbackAlpha: 1)
+        chrome.glass = blur.usesFallback ? AeroGlass.overlay(spec) : .clear
         window.appearance = Theme.nsAppearance   // context menus follow the colour mode
     }
 
