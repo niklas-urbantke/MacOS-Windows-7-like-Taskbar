@@ -114,6 +114,12 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     private let menuOpacityLabel = NSTextField(labelWithString: "")
     private let menuBlurSlider = NSSlider(frame: .zero)
     private let menuBlurLabel = NSTextField(labelWithString: "")
+    // Fensterfarbe (Aero) für Taskleiste (Win7) und Original-Startmenü.
+    private let aeroGrid = AeroSwatchGrid()
+    private let aeroNameLabel = NSTextField(labelWithString: "")
+    private let aeroIntensitySlider = NSSlider(frame: .zero)
+    private let aeroIntensityLabel = NSTextField(labelWithString: "")
+    private let aeroTransparencyBox = NSButton(checkboxWithTitle: "Transparenz aktivieren", target: nil, action: nil)
 
     func show() {
         if window == nil { build() }
@@ -293,6 +299,28 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
                                             #selector(menuOpacityChanged))
         let menuBlurRow = makeSurfaceRow("Unschärfe:", menuBlurSlider, menuBlurLabel,
                                          #selector(menuBlurChanged))
+        // Fensterfarbe (wie Windows 7 „Fensterfarbe und -darstellung“).
+        aeroGrid.onPick = { [weak self] kind in self?.aeroPicked(kind) }
+        aeroIntensitySlider.minValue = Double(AeroColor.intensityRange.lowerBound)
+        aeroIntensitySlider.maxValue = Double(AeroColor.intensityRange.upperBound)
+        aeroIntensitySlider.isContinuous = true
+        aeroIntensitySlider.target = self
+        aeroIntensitySlider.action = #selector(aeroIntensityChanged)
+        aeroIntensitySlider.translatesAutoresizingMaskIntoConstraints = false
+        aeroIntensitySlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        aeroIntensityLabel.translatesAutoresizingMaskIntoConstraints = false
+        aeroIntensityLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        let aeroIntensityRow = NSStackView(views: [NSTextField(labelWithString: "Farbintensität:"),
+                                                   aeroIntensitySlider, aeroIntensityLabel])
+        aeroIntensityRow.spacing = 8
+        let aeroNameRow = NSStackView(views: [NSTextField(labelWithString: "Aktuelle Farbe:"), aeroNameLabel])
+        aeroNameRow.spacing = 6
+        aeroTransparencyBox.target = self
+        aeroTransparencyBox.action = #selector(aeroTransparencyChanged)
+        let aeroHint = NSTextField(labelWithString: "Gilt für die Taskleiste im Windows-7-Profil und das Startmenü „Original (Windows 7)“.")
+        aeroHint.textColor = .secondaryLabelColor
+        aeroHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+
         let tbHeader = NSTextField(labelWithString: "Taskleiste")
         tbHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         let menuHeader = NSTextField(labelWithString: "Startmenü")
@@ -451,6 +479,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
             trayOrderHeader, trayOrderHint, trayOrderList,
             trayFeaturesHeader, flagBox, nowPlayingBox, wifiBox, monitorBox, secondsBox])
         let paneGlass = makePaneView([
+            header("Fensterfarbe"), aeroGrid, aeroNameRow, aeroIntensityRow, aeroTransparencyBox, aeroHint,
             tbHeader, tbOpacityRow, tbBlurRow, tbGlassRow,
             menuHeader, menuOpacityRow, menuBlurRow])
         let paneFinderCal = makePaneView([
@@ -473,7 +502,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
             PaneSection(id: "infobereich", title: "Infobereich", icon: "bell",
                         keywords: "tray symbolgroesse größe abstand reihenfolge flagge benachrichtigung netzwerk akku lautstaerke lautstärke cpu ram medien uhr sekunden wlan", view: paneTray),
             PaneSection(id: "transparenz", title: "Transparenz", icon: "circle.lefthalf.filled",
-                        keywords: "transparenz deckkraft unschaerfe unschärfe glas blur startmenü", view: paneGlass),
+                        keywords: "transparenz deckkraft unschaerfe unschärfe glas blur startmenü fensterfarbe farbe akzent intensität intensitaet aero himmel einfärbung", view: paneGlass),
             PaneSection(id: "finderkal", title: "Finder & Kalender", icon: "folder",
                         keywords: "finder fenster desktop symbol kalender termine", view: paneFinderCal),
             PaneSection(id: "wartung", title: "Wartung", icon: "wrench.and.screwdriver",
@@ -727,6 +756,58 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
 
     private func percent(_ v: Double) -> String { "\(Int((v * 100).rounded())) %" }
 
+    // MARK: - Fensterfarbe
+
+    private func aeroPicked(_ kind: AeroSwatch.Kind) {
+        switch kind {
+        case .preset(let p): AeroColor.select(preset: p)
+        case .accent: AeroColor.select(mode: .accent)
+        case .none: AeroColor.select(mode: .none)
+        case .custom:
+            AeroColor.select(mode: .custom)
+            let panel = NSColorPanel.shared
+            panel.showsAlpha = false
+            panel.isContinuous = true
+            panel.color = AeroColor.customColor
+            panel.setTarget(self)
+            panel.setAction(#selector(aeroCustomColorChanged(_:)))
+            panel.orderFront(nil)
+        }
+        aeroApply()
+    }
+
+    @objc private func aeroCustomColorChanged(_ sender: NSColorPanel) {
+        AeroColor.setCustomColor(sender.color)
+        aeroApply()
+    }
+
+    @objc private func aeroIntensityChanged() {
+        AeroColor.setIntensity(Int(aeroIntensitySlider.doubleValue.rounded()))
+        aeroApply()
+    }
+
+    @objc private func aeroTransparencyChanged() {
+        AeroColor.setTransparency(aeroTransparencyBox.state == .on)
+        aeroApply()
+    }
+
+    private func aeroApply() {
+        syncAero()
+        controller?.aeroColorChanged()
+    }
+
+    private func syncAero() {
+        aeroGrid.sync()
+        aeroNameLabel.stringValue = AeroColor.displayName
+        aeroIntensitySlider.doubleValue = Double(AeroColor.intensity)
+        let r = AeroColor.intensityRange
+        aeroIntensityLabel.stringValue = "\(Int((Double(AeroColor.intensity - r.lowerBound) / Double(r.count - 1) * 100).rounded())) %"
+        aeroTransparencyBox.state = AeroColor.transparency ? .on : .off
+        let colored = AeroColor.mode != .none
+        aeroIntensitySlider.isEnabled = colored
+        aeroTransparencyBox.isEnabled = colored
+    }
+
     @objc private func taskbarOpacityChanged() {
         controller?.setTaskbarOpacity(CGFloat(taskbarOpacitySlider.doubleValue))
         taskbarOpacityLabel.stringValue = percent(taskbarOpacitySlider.doubleValue)
@@ -750,6 +831,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
 
     private func syncFromController() {
         guard let c = controller else { return }
+        syncAero()
         dockBox.state = c.dockIsHidden ? .on : .off
         reserveBox.state = c.reserveEnabled ? .on : .off
         finderBox.state = c.finderNewWindow ? .on : .off

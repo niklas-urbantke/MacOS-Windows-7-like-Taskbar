@@ -33,6 +33,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let window: NSWindow
     private let glass = GlassBackgroundView()
     private let blur = NSVisualEffectView()
+    /// Windows-7 profile: Aero glass in the window colour (AeroColor), like AeroGlassBlur on the panel.
+    private let aero = AeroBackdropView()
     private let orb = StartOrbButton()
     private let clock = ClockView()
     private let battery = BatteryView()
@@ -230,6 +232,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         blur.state = .active
         blur.appearance = Theme.nsAppearance
         container.addSubview(blur)
+
+        aero.frame = container.bounds
+        aero.autoresizingMask = [.width, .height]
+        aero.topRadius = 0
+        container.addSubview(aero)
 
         glass.frame = container.bounds
         glass.autoresizingMask = [.width, .height]
@@ -1264,6 +1271,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             // Win11: Acryl-Blur nach Farbmodus (versteckt bei ausgeschaltetem Acryl), Fläche voll deckend
             // gezeichnet (die Deckkraft steckt schon in Theme.Win11.surface).
             Theme.Win11.configureBlur(blur, for: .bar)
+            aero.isHidden = true
             glass.alphaValue = 1
             window.appearance = Theme.win11NSAppearance   // Kontextmenüs folgen dem Farbmodus
         } else {
@@ -1272,11 +1280,23 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
             blur.blendingMode = .behindWindow
             blur.state = .active
             blur.appearance = Theme.nsAppearance
-            blur.isHidden = false
+            // Win7: Aero glass in the window colour; "Unschärfe" scales the AeroGlassBlur radius.
+            let useAero = Theme.taskbarStyle == .win7 && !aero.usesFallback
+            aero.isHidden = !useAero
+            blur.isHidden = useAero
             blur.alphaValue = Theme.taskbarBlur
+            if useAero {
+                let sigma = AeroGlass.blurSigma * Theme.barHeight / 40 * Theme.taskbarBlur / Theme.defaultTaskbarBlur
+                aero.configure(sigma: sigma, spec: AeroColor.current, fallbackAlpha: 1)
+            }
             glass.alphaValue = Theme.taskbarOpacity
             window.appearance = Theme.nsAppearance
         }
+    }
+
+    // Fensterfarbe (Aero): gilt für die Taskleiste im Win7-Profil und das Original-Startmenü.
+    func aeroColorChanged() {
+        Self.forAll { c in c.applyAppearance(); c.startMenu7.applyAppearance() }
     }
 
     // Transparenz / Unschärfe des Startmenüs (jeweils 0…1), an das Startmenü weitergereicht.

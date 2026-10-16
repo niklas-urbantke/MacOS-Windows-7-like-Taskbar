@@ -38,6 +38,11 @@ enum Theme {
         "finderAlwaysNewWindow": false,
         "hideFinderDesktop": true,
         "calendarEvents": true,
+        // Fensterfarbe (Aero): Windows-7-Standard "Himmel"
+        "aeroColorMode": "preset",
+        "aeroPreset": "sky",
+        "aeroIntensity": 107,
+        "aeroTransparency": true,
     ]
 
     static func registerInstallDefaults() {
