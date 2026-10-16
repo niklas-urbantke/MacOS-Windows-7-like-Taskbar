@@ -697,7 +697,7 @@ final class StartMenu7Controller: NSObject, NSTextFieldDelegate {
         super.init()
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = true
+        window.hasShadow = false   // the macOS window shadow adds a dark 1 px outline around the menu
         window.level = .popUpMenu
         window.collectionBehavior = [.canJoinAllSpaces, .transient]
         window.onCancel = { [weak self] in self?.escape() }
