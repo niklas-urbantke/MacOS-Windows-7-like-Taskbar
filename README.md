@@ -88,6 +88,8 @@ System-Tray mit den Original-Symbolen und vieles mehr.
   (oder „Passend zum Dock“), Icon-Rahmenbreite und Abstand zum Orb ebenfalls.
 - **Stil-Profile**: Vista, Windows 7 und Windows 11 (siehe unten), jeweils mit
   **Farbmodus** System / Hell / Dunkel.
+- **Fensterfarbe wie unter Windows 7**: Im Windows-7-Profil ist die Leiste echtes Aero-Glas in der
+  gewählten Farbe (siehe [Fensterfarbe](#fensterfarbe)).
 - **Start-Orb** mit drei animiert übergeblendeten Zuständen (Standard → Hover → *Startmenü
   geöffnet*), auswählbar und um eigene Orbs erweiterbar.
 - **Taskbar-Buttons** für laufende & angepinnte Apps. Klickverhalten wie beim Dock:
@@ -112,8 +114,9 @@ Zwei Designs, umschaltbar unter *Einstellungen → Startmenü → Darstellung*:
 [AeroThemePlasma](https://gitgud.io/wackyideas/aerothemeplasma):
 - Maße aus der Original-QML, Rahmen pixelgenau aus den Original-SVGs gerastert (gestochen scharf
   auf 1×- und Retina-Bildschirmen), skaliert mit der Taskleistenhöhe.
-- **Aero-Glas wie unter Windows 7**: leichter Blur und die DWM-Einfärbung „Sky“ wie im
-  AeroGlassBlur-Effekt, dazu die Reflexionsstreifen — gleichmäßig transparent, oben gerundet.
+- **Aero-Glas wie unter Windows 7**: leichter Blur und die DWM-Einfärbung wie im
+  AeroGlassBlur-Effekt in der gewählten [Fensterfarbe](#fensterfarbe) (Standard „Himmel“),
+  dazu die Reflexionsstreifen — gleichmäßig transparent, oben gerundet.
 - Schwebendes Profilbild, das beim Überfahren rechts in das Symbol des Eintrags überblendet.
 - **Alle Programme** als aufklappbarer Ordnerbaum, **Suche** nach Programmen und Dateien,
   Herunterfahren-Splitbutton mit Sperren / Abmelden / Energie sparen / Neu starten.
@@ -130,6 +133,15 @@ Für beide:
 - Rechte Spalte frei bearbeitbar (Orte, Trenner, eigene Einträge).
 - Tastenkürzel frei belegbar (Standard: **fn (Globe) + Control**); **Ctrl + 1…9** startet/aktiviert
   die n-te angepinnte App.
+
+### Fensterfarbe
+Wie unter Windows 7 *„Fensterfarbe und -darstellung“* — unter *Einstellungen → Transparenz*:
+- die **16 Windows-7-Farben** (Himmel, Dämmerung, Meer, Blatt, Limone, Sonne, Kürbis, Rubin,
+  Fuchsie, Rouge, Violett, Lavendel, Taupe, Schokolade, Schiefer, Frost) mit ihren Originalwerten,
+- **eigene Farbe** per Farbwähler, **macOS-Akzentfarbe** oder **ohne Einfärbung** (klares Glas),
+- **Farbintensität** und **Transparenz aktivieren** (aus = deckendes Glas).
+
+Die Farbe gilt für das Original-Startmenü und die Taskleiste im Windows-7-Profil.
 
 ### Infobereich (System-Tray)
 - **Original-Windows-7-Symbole** (aus AeroThemePlasma) für Netzwerk mit Signalstärke,
@@ -172,7 +184,8 @@ Rechtsklick auf den Orb → **Einstellungen…** — mit Seitenleiste und **Such
   Windows-11-Optionen
 - **Startmenü**: Start-Symbol, Design & Stil, rechte Spalte, Tastenkürzel
 - **Infobereich**: Größen, Reihenfolge und Funktionen der Tray-Symbole
-- **Transparenz**: Deckkraft/Unschärfe von Leiste und (bisherigem) Startmenü
+- **Transparenz**: Fensterfarbe (Farbe, Intensität, Transparenz), Deckkraft/Unschärfe von Leiste
+  und (bisherigem) Startmenü
 - **Finder & Kalender**: Finder-Verhalten und -Symbol, Kalendertermine
 - **Wartung**: Einstellungen **exportieren/importieren**, Dock-Apps übernehmen,
   **Updates** (aus dem Quellcode bauen, mit Fortschrittsanzeige)
@@ -246,6 +259,7 @@ Sources/Win7Taskbar/
   StartOrbButton.swift / OrbCatalog    Animierter Orb + Orb-Verwaltung
   TaskbarButton.swift / TaskbarItem    Taskbar-Button (Zustände, Gruppierung, Hover-Glow) + Modell
   StartMenu7.swift                     Startmenü „Original (Windows 7)“ (SevenStart-Nachbau)
+  AeroGlass.swift / AeroColorPicker    Aero-Glas (Blur + DWM-Farbmatrix), Fensterfarbe + Farbauswahl
   StartMenu.swift                      Startmenü „bisherige Variante“
   StartMenu11.swift / StartMenuShared  Windows-11-Startmenü + gemeinsame Menü-Logik
   StartMenuActions.swift               Aktionen der rechten Spalte (gemeinsam für alle Menüs)
@@ -276,7 +290,7 @@ ThemeResources/                        Grafiken (u. a. sm-* = Startmenü-Rahmen 
 - Das macOS-Dock lässt sich nicht vollständig beenden — die App versetzt es in den Auto-Hide.
 - Fremde Menüleisten-Symbole anderer Apps lassen sich nicht in den Tray holen; systemweite
   Now-Playing-Infos sind für Fremd-Apps gesperrt, daher die direkte Spotify/Music-Abfrage.
-- Der Glas-Blur des Original-Startmenüs nutzt eine nicht öffentliche macOS-Schnittstelle; fehlt
+- Das Aero-Glas (Original-Startmenü, Windows-7-Taskleiste) nutzt eine nicht öffentliche macOS-Schnittstelle; fehlt
   sie, wird automatisch auf das Standard-Material zurückgefallen.
 - macOS rendert Schrift ohne Hinting/ClearType — Segoe UI wirkt daher etwas weicher als unter Windows.
 
