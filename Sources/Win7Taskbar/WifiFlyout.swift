@@ -5,7 +5,7 @@ import SystemConfiguration
 // hosted in the system tray's popup). Geometry in the original's reference pixels, scaled by `k` like the
 // Start menu (taskbar height / 40); the chrome comes from the original SVGs, rasterised onto the pixel grid
 // (ThemeResources/wf-*), and is drawn at native pixel size:
-// - frame: Seven-Black solid/dialogs/background.svg (8 px glass edge, white inside), window 288 × 320,
+// - frame (TrayFlyoutHost in TrayFlyout.swift): Seven-Black solid/dialogs/background.svg (8 px glass edge, white inside), window 288 × 320,
 //   main item 272 × 304 inset by 8; Aero glass in the window colour behind the frame's glass band
 // - footer: #f1f5fb strip (42 px, 4 px #ccd9ea gradient on top) with the link "Netzwerk- und Freigabecenter öffnen"
 // - toolbar: "WLAN" checkbox (Kvantum Windows7Aero checkbox + network-wireless-on/off), flat refresh button;
@@ -13,173 +13,6 @@ import SystemConfiguration
 // - list: connected network with a 32 px signal icon on the left and a bold title, the others mirrored with a
 //   24 px icon on the right and a #0061bd title; "Verfügbare Verbindungen" section (#40555a, #b1b1b1 line);
 //   viewitem "hover" highlight; a click expands the row with Win7 buttons and, if needed, a password field.
-
-private enum WF {
-    static func hex(_ h: UInt32, _ a: CGFloat = 1) -> NSColor {
-        NSColor(srgbRed: CGFloat((h >> 16) & 0xff) / 255, green: CGFloat((h >> 8) & 0xff) / 255,
-                blue: CGFloat(h & 0xff) / 255, alpha: a)
-    }
-    static func font(_ k: CGFloat, bold: Bool = false) -> NSFont { Menu7Font.font(size: 12 * k, bold: bold) }
-
-    /// Single line of text, vertically centred in `rect`.
-    static func text(_ s: String, in rect: NSRect, font: NSFont, color: NSColor, alignment: NSTextAlignment = .left,
-                     underline: Bool = false) {
-        let style = NSMutableParagraphStyle()
-        style.lineBreakMode = .byTruncatingTail
-        style.alignment = alignment
-        var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: style]
-        if underline { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-        let str = NSAttributedString(string: s, attributes: attrs)
-        let h = ceil(str.size().height)
-        str.draw(with: NSRect(x: rect.minX, y: (rect.midY - h / 2).rounded(), width: rect.width, height: h),
-                 options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-    }
-
-    static func width(_ s: String, _ font: NSFont) -> CGFloat {
-        ceil((s as NSString).size(withAttributes: [.font: font]).width)
-    }
-
-    /// Signal icon like plasma-nm: quality 0 → 0, < 20 → 20, < 40 → 40, < 60 → 60, < 80 → 80, else 100,
-    /// "-locked" for secured networks; `big` = the 32 px variant of the connected row.
-    static func barsIcon(rssi: Int, secure: Bool, big: Bool) -> NSImage? {
-        let q = rssi == 0 ? 100 : max(0, min(100, 2 * (rssi + 100)))
-        let lvl = q <= 0 ? 0 : q < 20 ? 20 : q < 40 ? 40 : q < 60 ? 60 : q < 80 ? 80 : 100
-        return Menu7Assets.image("wf-bars-\(lvl)\(secure ? "-locked" : "")\(big ? "-big" : "")")
-    }
-
-    static func openSettings(_ pane: String) {
-        if let url = URL(string: "x-apple.systempreferences:\(pane)") { NSWorkspace.shared.open(url) }
-    }
-}
-
-// MARK: - Controls
-
-/// Windows 7 push button (Kvantum Windows7Aero "btn": normal / hover / pressed).
-private final class WFButton: M7HoverView {
-    var title: String { didSet { needsDisplay = true } }
-    var k: CGFloat = 1
-    var onClick: (() -> Void)?
-    private var pressed = false { didSet { needsDisplay = true } }
-
-    init(_ title: String) { self.title = title; super.init(frame: .zero) }
-    required init?(coder: NSCoder) { fatalError() }
-
-    /// At least 75 px wide like Windows buttons, text plus 10 px each side.
-    var preferredWidth: CGFloat { max((75 * k).rounded(), WF.width(title, WF.font(k)) + (20 * k).rounded()) }
-
-    override func mouseDown(with event: NSEvent) { pressed = true }
-    override func mouseUp(with event: NSEvent) {
-        pressed = false
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        let state = pressed ? "pressed" : (hovering ? "focused" : "normal")
-        Menu7Assets.draw(Menu7Assets.frame("wf-btn-\(state)", 3, 3, 3, 3), in: bounds)
-        WF.text(title, in: bounds, font: WF.font(k), color: .black, alignment: .center)
-    }
-}
-
-/// Flat tool button with an icon (frame only on hover/press), e.g. refresh.
-private final class WFToolButton: M7HoverView {
-    let icon: String
-    var k: CGFloat = 1
-    var onClick: (() -> Void)?
-    private var pressed = false { didSet { needsDisplay = true } }
-
-    init(icon: String) { self.icon = icon; super.init(frame: .zero) }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func mouseDown(with event: NSEvent) { pressed = true }
-    override func mouseUp(with event: NSEvent) {
-        pressed = false
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        if pressed || hovering {
-            Menu7Assets.draw(Menu7Assets.frame(pressed ? "wf-btn-pressed" : "wf-btn-focused", 3, 3, 3, 3), in: bounds)
-        }
-        let s = (16 * k).rounded()
-        Menu7Assets.draw(Menu7Assets.image(icon), in: NSRect(x: ((bounds.width - s) / 2).rounded(),
-                                                             y: ((bounds.height - s) / 2).rounded(), width: s, height: s))
-    }
-}
-
-/// QtQuick checkbox under Kvantum Windows7Aero: 13 px box, the Wi-Fi icon, then the label.
-private final class WFCheckbox: M7HoverView {
-    let title: String
-    var k: CGFloat = 1
-    var checked = false { didSet { needsDisplay = true } }
-    var enabled = true { didSet { needsDisplay = true } }
-    var onToggle: ((Bool) -> Void)?
-
-    init(_ title: String) { self.title = title; super.init(frame: .zero) }
-    required init?(coder: NSCoder) { fatalError() }
-
-    var preferredWidth: CGFloat { (13 * k).rounded() + (4 * k).rounded() * 2 + (16 * k).rounded() + WF.width(title, WF.font(k)) + 2 }
-
-    override func mouseUp(with event: NSEvent) {
-        guard enabled, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        checked.toggle()
-        onToggle?(checked)
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        let box = (13 * k).rounded(), gap = (4 * k).rounded(), icon = (16 * k).rounded()
-        let state = !enabled ? "disabled" : (hovering ? "focused" : "normal")
-        let name = checked ? "wf-checkbox-checked-\(state)" : "wf-checkbox-\(state)"
-        Menu7Assets.draw(Menu7Assets.image(name), in: NSRect(x: 0, y: ((bounds.height - box) / 2).rounded(), width: box, height: box))
-        let ix = box + gap
-        Menu7Assets.draw(Menu7Assets.image(checked ? "wf-wifi-on" : "wf-wifi-off"),
-                         in: NSRect(x: ix, y: ((bounds.height - icon) / 2).rounded(), width: icon, height: icon))
-        let tx = ix + icon + gap
-        WF.text(title, in: NSRect(x: tx, y: 0, width: bounds.width - tx, height: bounds.height),
-                font: WF.font(k), color: enabled ? .black : .disabledControlTextColor)
-    }
-}
-
-/// Text link in the footer (#0066cc, underlined on hover, pointing-hand cursor).
-private final class WFLink: M7HoverView {
-    let title: String
-    var k: CGFloat = 1
-    var onClick: (() -> Void)?
-    init(_ title: String) { self.title = title; super.init(frame: .zero) }
-    required init?(coder: NSCoder) { fatalError() }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        WF.text(title, in: bounds, font: WF.font(k), color: WF.hex(0x0066cc), alignment: .center, underline: hovering)
-    }
-}
-
-/// Text field with the original line-edit frame (search: plasmoid lineedit.svg, password: widgets/lineedit.svg).
-private final class WFFieldBox: M7FlippedView {
-    let frameName: String
-    let inset: CGFloat
-    init(frameName: String, inset: CGFloat) { self.frameName = frameName; self.inset = inset; super.init(frame: .zero) }
-    required init?(coder: NSCoder) { fatalError() }
-    override func draw(_ dirtyRect: NSRect) {
-        Menu7Assets.draw(Menu7Assets.frame(frameName, inset, inset, inset, inset), in: bounds)
-    }
-}
-
-// MARK: - Chrome (glass frame + footer strip)
-
-private final class WFChrome: M7FlippedView {
-    var k: CGFloat = 1
-    func r(_ v: CGFloat) -> CGFloat { (v * k).rounded() }
-    override func draw(_ dirtyRect: NSRect) {
-        let b = bounds
-        guard b.width > 40, b.height > 40 else { return }
-        Menu7Assets.draw(Menu7Assets.frame("wf-dialog", 8, 8, 8, 8), in: b)
-        // Footer strip: 42 px, #f1f5fb with a 4 px #ccd9ea → #f1f5fb gradient on top.
-        let strip = NSRect(x: 8, y: b.height - 8 - r(42), width: b.width - 16, height: r(42))
-        WF.hex(0xf1f5fb).setFill()
-        strip.fill()
-        NSGradient(starting: WF.hex(0xccd9ea), ending: WF.hex(0xf1f5fb))?
-            .draw(in: NSRect(x: strip.minX, y: strip.minY, width: strip.width, height: r(4)), angle: 90)
-    }
-}
 
 // MARK: - List rows
 
@@ -191,10 +24,10 @@ private final class WFSection: M7FlippedView {
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ dirtyRect: NSRect) {
         let r: (CGFloat) -> CGFloat = { ($0 * self.k).rounded() }
-        WF.hex(0xb1b1b1).setFill()
+        TF.hex(0xb1b1b1).setFill()
         NSRect(x: 0, y: r(4), width: bounds.width, height: 1).fill()
-        WF.text(title, in: NSRect(x: r(10), y: r(4), width: bounds.width - r(10), height: bounds.height - r(4)),
-                font: WF.font(k), color: WF.hex(0x40555a))
+        TF.text(title, in: NSRect(x: r(10), y: r(4), width: bounds.width - r(10), height: bounds.height - r(4)),
+                font: TF.font(k), color: TF.hex(0x40555a))
     }
 }
 
@@ -202,7 +35,7 @@ private final class WFSection: M7FlippedView {
 private final class WFHint: M7FlippedView {
     var k: CGFloat = 1
     var onAllow: (() -> Void)?
-    let button = WFButton("Ortungsdienste erlauben")
+    let button = TFButton("Ortungsdienste erlauben")
     private let label = NSTextField(wrappingLabelWithString:
         "macOS zeigt die Namen der WLAN-Netze nur Apps mit Ortungsfreigabe an. Der Standort selbst wird nicht verwendet.")
 
@@ -217,7 +50,7 @@ private final class WFHint: M7FlippedView {
 
     func height(for width: CGFloat) -> CGFloat {
         let r: (CGFloat) -> CGFloat = { ($0 * self.k).rounded() }
-        label.font = WF.font(k)
+        label.font = TF.font(k)
         label.preferredMaxLayoutWidth = width - r(20)
         let lh = ceil(label.fittingSize.height)
         return r(6) + lh + r(6) + r(23) + r(8)
@@ -225,7 +58,7 @@ private final class WFHint: M7FlippedView {
     override func layout() {
         super.layout()
         let r: (CGFloat) -> CGFloat = { ($0 * self.k).rounded() }
-        label.font = WF.font(k)
+        label.font = TF.font(k)
         label.preferredMaxLayoutWidth = bounds.width - r(20)
         let lh = ceil(label.fittingSize.height)
         label.frame = NSRect(x: r(10), y: r(6), width: bounds.width - r(20), height: lh)
@@ -248,16 +81,16 @@ private final class WFRow: M7HoverView, NSTextFieldDelegate {
     var onDisconnect: (() -> Void)?
     var onContext: ((NSEvent) -> Void)?
 
-    private let actionButton = WFButton("Verbinden")
-    private let detailsButton = WFButton("Details")
-    private let passwordBox = WFFieldBox(frameName: "wf-lineedit", inset: 3)
+    private let actionButton = TFButton("Verbinden")
+    private let detailsButton = TFButton("Details")
+    private let passwordBox = TFFieldBox(frameName: "wf-lineedit", inset: 3)
     private let password = NSSecureTextField()
 
     init(_ net: WifiManager.Network) {
         self.net = net
         super.init(frame: .zero)
         actionButton.onClick = { [weak self] in self?.primaryAction() }
-        detailsButton.onClick = { WF.openSettings("com.apple.wifi-settings-extension") }
+        detailsButton.onClick = { TF.openSettings("com.apple.wifi-settings-extension") }
         password.isBordered = false
         password.drawsBackground = false
         password.focusRingType = .none
@@ -325,7 +158,7 @@ private final class WFRow: M7HoverView, NSTextFieldDelegate {
         if needsPassword {
             let fy = y + r(23) + r(4) + 1 + r(4)
             passwordBox.frame = NSRect(x: r(16), y: fy, width: bounds.width - 2 * r(16), height: r(23))
-            password.font = WF.font(k)
+            password.font = TF.font(k)
             let fh = ceil(password.font!.boundingRectForFont.height) + 2
             password.frame = NSRect(x: passwordBox.frame.minX + r(5), y: (passwordBox.frame.midY - fh / 2).rounded(),
                                     width: passwordBox.frame.width - r(10), height: fh)
@@ -335,8 +168,8 @@ private final class WFRow: M7HoverView, NSTextFieldDelegate {
     override func draw(_ dirtyRect: NSRect) {
         if hovering { Menu7Assets.draw(Menu7Assets.frame("wf-hover", 3, 3, 3, 3), in: bounds) }
         let s = iconSize, h = headHeight
-        let icon = WF.barsIcon(rssi: net.rssi, secure: net.secure, big: connected)
-        let titleFont = WF.font(k, bold: connected)
+        let icon = TF.barsIcon(rssi: net.rssi, secure: net.secure, big: connected)
+        let titleFont = TF.font(k, bold: connected)
         let name = net.ssid ?? "WLAN-Netzwerk"
         let textX: CGFloat, textW: CGFloat
         if connected {
@@ -346,13 +179,13 @@ private final class WFRow: M7HoverView, NSTextFieldDelegate {
             Menu7Assets.draw(icon, in: NSRect(x: bounds.width - r(4) - s, y: ((h - s) / 2).rounded(), width: s, height: s))
             textX = r(4); textW = bounds.width - r(4) - s - r(5) - textX
         }
-        let titleColor = connected ? NSColor.black : WF.hex(0x0061bd)
+        let titleColor = connected ? NSColor.black : TF.hex(0x0061bd)
         if let sub = subtitle {
             let lh = r(16), top = ((h - 2 * lh) / 2).rounded()
-            WF.text(name, in: NSRect(x: textX, y: top, width: textW, height: lh), font: titleFont, color: titleColor)
-            WF.text(sub, in: NSRect(x: textX, y: top + lh, width: textW, height: lh), font: WF.font(k), color: .black)
+            TF.text(name, in: NSRect(x: textX, y: top, width: textW, height: lh), font: titleFont, color: titleColor)
+            TF.text(sub, in: NSRect(x: textX, y: top + lh, width: textW, height: lh), font: TF.font(k), color: .black)
         } else {
-            WF.text(name, in: NSRect(x: textX, y: 0, width: textW, height: h), font: titleFont, color: titleColor)
+            TF.text(name, in: NSRect(x: textX, y: 0, width: textW, height: h), font: titleFont, color: titleColor)
         }
         if expanded && needsPassword {
             // widgets/line.svg "horizontal-line": 1 px black at 65 %.
@@ -365,18 +198,15 @@ private final class WFRow: M7HoverView, NSTextFieldDelegate {
 // MARK: - Controller
 
 final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
-    private let window: KeyableWindow
-    private let root = M7FlippedView()
-    private let glass = AeroBackdropView()
-    private let chrome = WFChrome()
-    private let wifiBox = WFCheckbox("WLAN")
-    private let refresh = WFToolButton(icon: "wf-refresh")
-    private let searchBox = WFFieldBox(frameName: "wf-search", inset: 6)
+    private let host = TrayFlyoutHost(footer: "Netzwerk- und Freigabecenter öffnen")
+    private var root: M7FlippedView { host.root }
+    private let wifiBox = TFCheckbox("WLAN")
+    private let refresh = TFToolButton(icon: "wf-refresh")
+    private let searchBox = TFFieldBox(frameName: "wf-search", inset: 6)
     private let search = NSTextField()
     private let scroll = NSScrollView()
     private let listDoc = M7FlippedView()
     private let placeholder = NSTextField(wrappingLabelWithString: "")
-    private let footer = WFLink("Netzwerk- und Freigabecenter öffnen")
 
     private let wifi = WifiManager.shared
     private var networks: [WifiManager.Network] = []
@@ -385,37 +215,25 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
     private var connecting: String?
     private var failed: Set<String> = []
     private var rescan: Timer?
-    private var k: CGFloat = 1
-    private var W: CGFloat = 0, H: CGFloat = 0
-    private func r(_ v: CGFloat) -> CGFloat { (v * k).rounded() }
+    private var k: CGFloat { host.k }
+    private var W: CGFloat { host.W }
+    private var H: CGFloat { host.H }
+    private func r(_ v: CGFloat) -> CGFloat { host.r(v) }
 
-    var isVisible: Bool { window.isVisible }
+    var isVisible: Bool { host.isVisible }
     /// Called whenever the Wi-Fi state may have changed (to refresh the tray icon).
     var onStateChange: (() -> Void)?
 
     override init() {
-        window = KeyableWindow(contentRect: NSRect(x: 0, y: 0, width: 288, height: 320),
-                               styleMask: [.borderless], backing: .buffered, defer: false)
         super.init()
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false   // the macOS shadow adds a dark 1 px outline
-        window.level = .popUpMenu
-        window.collectionBehavior = [.canJoinAllSpaces, .transient]
-        window.onCancel = { [weak self] in self?.escape() }
+        host.onEscape = { [weak self] in self?.escape() }
+        host.onHide = { [weak self] in self?.rescan?.invalidate(); self?.rescan = nil }
         build()
-        NotificationCenter.default.addObserver(self, selector: #selector(resigned),
-                                               name: NSWindow.didResignKeyNotification, object: window)
         NotificationCenter.default.addObserver(self, selector: #selector(wifiChanged),
                                                name: WifiManager.changedNotification, object: nil)
     }
 
     private func build() {
-        window.contentView = root
-        glass.roundBottom = true
-        root.addSubview(glass)
-        root.addSubview(chrome)
-
         wifiBox.onToggle = { [weak self] on in
             self?.wifi.setPower(on)
             self?.networks = []
@@ -450,57 +268,43 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
         placeholder.textColor = .black
         root.addSubview(placeholder)
 
-        footer.onClick = { [weak self] in
-            WF.openSettings("com.apple.Network-Settings.extension")
+        host.footer.onClick = { [weak self] in
+            TF.openSettings("com.apple.Network-Settings.extension")
             self?.hide()
         }
-        root.addSubview(footer)
     }
 
     // MARK: Show / hide
 
     func toggle(anchor: NSRect, on screen: NSScreen) {
-        if window.isVisible { hide() } else { show(anchor: anchor, on: screen) }
+        if host.isVisible { hide() } else { show(anchor: anchor, on: screen) }
     }
 
     func show(anchor: NSRect, on screen: NSScreen) {
-        k = max(1, Theme.barHeight / 40)
-        W = r(288); H = r(320)
+        host.setMainSize(width: 272, height: 304)
         search.stringValue = ""
         expanded = nil; passwordFor = nil; failed = []
         networks = currentOnly()
         layoutChrome()
         reloadList()
 
-        // Centred on the tray icon, 10 px above it, kept 10 px inside the screen.
-        let vf = screen.frame
-        var x = (anchor.midX - W / 2).rounded()
-        x = max(vf.minX + r(10), min(x, vf.maxX - r(10) - W))
-        window.setFrame(NSRect(x: x, y: anchor.maxY + r(10), width: W, height: H), display: true)
-        glass.configure(sigma: AeroGlass.blurSigma * k, spec: AeroColor.current, fallbackAlpha: 1)
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(search)
+        host.show(anchor: anchor, on: screen)
+        host.window.makeFirstResponder(search)
         if wifi.canAskForLocation { wifi.requestLocation() }
         scanNow()
         rescan?.invalidate()
         rescan = Timer.scheduledTimer(withTimeInterval: 10.2, repeats: true) { [weak self] _ in self?.scanNow() }
     }
 
-    func hide() {
-        rescan?.invalidate(); rescan = nil
-        window.orderOut(nil)
-    }
+    func hide() { host.hide() }
 
     private func escape() {
         if !search.stringValue.isEmpty { search.stringValue = ""; layoutChrome(); reloadList() } else { hide() }
     }
 
-    @objc private func resigned() { hide() }
-
     @objc private func wifiChanged() {
         onStateChange?()
-        guard window.isVisible else { return }
+        guard host.isVisible else { return }
         wifiBox.checked = wifi.powerOn
         scanNow()
     }
@@ -517,7 +321,7 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
     private func scanNow() {
         guard wifi.powerOn, !wifi.scanning else { if passwordFor == nil { reloadList() }; return }
         wifi.scan { [weak self] list in
-            guard let self, self.window.isVisible else { return }
+            guard let self, self.host.isVisible else { return }
             var l = list.filter { $0.ssid != nil }
             // Connected but the name is hidden (no Location permission): keep the current connection on top.
             if !l.contains(where: { $0.current }), let cur = self.currentOnly().first { l.insert(cur, at: 0) }
@@ -552,15 +356,8 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
     // MARK: Layout
 
     private func layoutChrome() {
-        root.frame = NSRect(x: 0, y: 0, width: W, height: H)
-        glass.frame = root.bounds
-        glass.topRadius = 6
-        chrome.k = k
-        chrome.frame = root.bounds
-        chrome.needsDisplay = true
-
         // Applet area: main item (8,8, 272 × 304) inset by 8 → window x 16…272, y 16…266.
-        let ax = 8 + r(8), aw = W - 2 * ax
+        let ax = host.appletRect.minX, aw = host.appletRect.width
         wifiBox.k = k
         wifiBox.checked = wifi.powerOn
         wifiBox.enabled = wifi.hasWifi
@@ -573,7 +370,7 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
         let sy = wifiBox.frame.maxY + r(5)
         searchBox.frame = NSRect(x: ax, y: sy, width: aw, height: searching ? r(24) : 0)
         searchBox.isHidden = !searching
-        search.font = WF.font(k)
+        search.font = TF.font(k)
         let fh = ceil(search.font!.boundingRectForFont.height) + 2
         search.frame = NSRect(x: ax + r(6), y: searching ? (searchBox.frame.midY - fh / 2).rounded() : sy, width: aw - r(30),
                               height: fh)
@@ -581,11 +378,7 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
 
         // List: full white inner width, from below the heading (6 px padding) to the footer strip.
         let listTop = (searching ? searchBox.frame.maxY : wifiBox.frame.maxY) + r(6)
-        let footerTop = H - 8 - r(42)
-        scroll.frame = NSRect(x: 8, y: listTop, width: W - 16, height: footerTop - listTop)
-
-        footer.k = k
-        footer.frame = NSRect(x: 8, y: H - 8 - r(40), width: W - 16, height: r(40) - r(4))
+        scroll.frame = NSRect(x: 8, y: listTop, width: W - 16, height: host.footerTop - listTop)
     }
 
     private func rowFor(_ ssid: String) -> WFRow? {
@@ -657,7 +450,7 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
                 menu.addItem(main)
                 let details = NSMenuItem(title: "Details", action: #selector(self.menuAction(_:)), keyEquivalent: "")
                 details.target = self
-                details.representedObject = { WF.openSettings("com.apple.wifi-settings-extension") } as () -> Void
+                details.representedObject = { TF.openSettings("com.apple.wifi-settings-extension") } as () -> Void
                 menu.addItem(details)
                 NSMenu.popUpContextMenu(menu, with: event, for: row)
             }
@@ -673,7 +466,7 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
         placeholder.isHidden = text == nil
         if let t = text {
             placeholder.stringValue = t
-            placeholder.font = WF.font(k)
+            placeholder.font = TF.font(k)
             let pw = scroll.frame.width - 4 * r(8)
             placeholder.preferredMaxLayoutWidth = pw
             let ph = ceil(placeholder.fittingSize.height)

@@ -12,6 +12,33 @@ enum ClassicTray {
     static var text: NSColor { pick(.white, Theme.Aero.text) }
 
     /// Hover field of a tray element: accent-tinted glass, on bright glass with a thin accent rim.
+    /// Hover highlight of a tray icon like AeroThemePlasma's system tray (svgs/tabbar.svgz "active-tab",
+    /// AbstractItem.qml): it fills the cell from 2 px below the bar's top edge to its bottom — dark/light edge
+    /// columns on both sides (strongest in the middle), a light-blue bottom line and a blue glow above it.
+    static func trayHighlight(_ cell: NSRect, glow: CGFloat = 10) {
+        let k = max(1, Theme.barHeight / 40)
+        let r = NSRect(x: cell.minX, y: cell.minY, width: cell.width, height: cell.height - (2 * k).rounded())
+        func col(_ x: CGFloat, _ c: NSColor, _ peak: CGFloat) {
+            NSGradient(colors: [c.withAlphaComponent(0.7 * 0.03), c.withAlphaComponent(0.7 * peak), c.withAlphaComponent(0.7 * 0.03)])?
+                .draw(in: NSRect(x: x, y: r.minY, width: 1, height: r.height), angle: 90)
+        }
+        let light = NSColor(srgbRed: 0xeb / 255.0, green: 0xeb / 255.0, blue: 0xeb / 255.0, alpha: 1)
+        col(r.minX, .black, 0.28); col(r.minX + 1, light, 0.34)
+        col(r.maxX - 1, .black, 0.28); col(r.maxX - 2, light, 0.34)
+        // Glow: #b5daff at 76 % fading out, about 20 × 10 px above the bottom edge.
+        let glowColor = NSColor(srgbRed: 0xb5 / 255.0, green: 0xda / 255.0, blue: 1, alpha: 1)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: r.insetBy(dx: 2, dy: 0)).addClip()
+        let rad = glow * k   // the clock's own tabbar.svgz has a narrower glow
+        NSGradient(starting: glowColor.withAlphaComponent(0.76), ending: glowColor.withAlphaComponent(0))?
+            .draw(fromCenter: NSPoint(x: r.midX, y: r.minY), radius: 0, toCenter: NSPoint(x: r.midX, y: r.minY), radius: rad, options: [])
+        NSGraphicsContext.restoreGraphicsState()
+        // Bottom line: #b5dfff 9 % → #c7e2ff 96 % → 9 %.
+        let edge = NSColor(srgbRed: 0xb5 / 255.0, green: 0xdf / 255.0, blue: 1, alpha: 0.09)
+        let mid = NSColor(srgbRed: 0xc7 / 255.0, green: 0xe2 / 255.0, blue: 1, alpha: 0.96)
+        NSGradient(colors: [edge, mid, edge])?.draw(in: NSRect(x: r.minX + 2, y: r.minY, width: r.width - 4, height: 1), angle: 0)
+    }
+
     static func fillHover(_ rect: NSRect, radius: CGFloat = 4) {
         let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
         if Theme.isDark {
@@ -132,7 +159,7 @@ final class WifiView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
+        if hovering { ClassicTray.trayHighlight(bounds) }
         let name: String
         switch state {
         case .wireless(let lvl): name = "tray-wifi-\(lvl)"
@@ -171,7 +198,7 @@ final class VolumeView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
+        if hovering { ClassicTray.trayHighlight(bounds) }
         let name: String
         if muted || level == 0 { name = "tray-vol-muted" }
         else if level < 34 { name = "tray-vol-low" }
@@ -181,9 +208,12 @@ final class VolumeView: NSView {
     }
 }
 
-/// Windows 7 "Action Center" flag. Click opens macOS notification settings (the closest analogue).
+/// Windows 7 "Action Center" flag. Click opens the notification flyout (`onClick`), otherwise the
+/// macOS Notification Center; `active` shows the flag with its badge while there are entries.
 final class NotificationFlagView: NSView {
     private var hovering = false
+    var onClick: (() -> Void)?
+    var active = false { didSet { if active != oldValue { needsDisplay = true } } }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -197,15 +227,15 @@ final class NotificationFlagView: NSView {
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
-        SystemInfo.openNotificationCenter()
+        if let onClick { onClick() } else { SystemInfo.openNotificationCenter() }
     }
 
     func refresh() { needsDisplay = true }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 1, dy: 8)) }
+        if hovering { ClassicTray.trayHighlight(bounds) }
         // Original upright Windows 7 flag (already white); light-mode shadow handled by drawIcon.
-        ClassicTray.drawIcon("tray-flag", in: bounds, glyph: Theme.s(Theme.trayGlyph(for: "flag")))
+        ClassicTray.drawIcon(active ? "tray-flag-active" : "tray-flag", in: bounds, glyph: Theme.s(Theme.trayGlyph(for: "flag")))
     }
 }
 
