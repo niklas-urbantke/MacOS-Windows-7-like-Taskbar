@@ -43,6 +43,11 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let showDesktop = ShowDesktopButton()
     private let nowPlayingView = NowPlayingView(frame: .zero)
     private let wifiView = WifiView(frame: .zero)
+    private let wifiFlyout = WifiFlyoutController()
+    private let clockFlyout = ClockFlyoutController()
+    private let notificationFlyout = NotificationFlyoutController()
+    private let batteryFlyout = BatteryFlyoutController()
+    private let volumeFlyout = VolumeFlyoutController()
     private let monitorView = HardwareMonitorView(frame: .zero)
     private let startMenuClassic = StartMenuController()
     private let startMenu7 = StartMenu7Controller()
@@ -127,6 +132,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         showDesktop.onClick = { [weak self] in self?.minimizeEverything() }
         // Kalender nur auf dem Hauptbildschirm; auf Nebenleisten ist die Uhr nicht anklickbar.
         if isPrimary { clock.onClick = { [weak self] in self?.showCalendar() } }
+        clock.isActive = { [weak self] in self?.clockFlyout.isVisible == true }
         win11Clock.opensCalendar = isPrimary
         volume.onClick = { [weak self] in self?.showVolume() }
         glass.onDropFiles = { [weak self] urls in self?.pinDroppedFiles(urls) }
@@ -255,6 +261,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         for v in [showDesktop, clock, volume] { v.autoresizingMask = [.minXMargin]; glass.addSubview(v) }
         if hasBattery { battery.autoresizingMask = [.minXMargin]; glass.addSubview(battery) }
         for v in [nowPlayingView, wifiView, monitorView, flag] { v.autoresizingMask = [.minXMargin] }
+        wifiView.onClick = { [weak self] in self?.toggleWifiFlyout() }
+        wifiFlyout.onStateChange = { [weak self] in self?.wifiView.refresh() }
+        flag.onClick = { [weak self] in self?.toggleNotificationFlyout() }
+        battery.onClick = { [weak self] in self?.toggleBatteryFlyout() }
+        volumeFlyout.onStateChange = { [weak self] in self?.volume.refresh() }
+        notificationFlyout.onOpenSystemCenter = { SystemInfo.openNotificationCenter() }
+        notificationFlyout.onCountChange = { [weak self] n in self?.flag.active = n > 0 }
         for v: NSView in [win11Clock, win11Performance, win11Media] {
             v.autoresizingMask = [.minXMargin]
         }
@@ -1372,6 +1385,10 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
                 self.battery.refresh()
                 if self.tick % 2 == 0 { self.volume.refresh() }
                 if self.wifiEnabled && self.tick % 5 == 0 { self.wifiView.refresh() }
+                // The flag shows its badge while the notification flyout has entries.
+                if self.flagEnabled && self.tick % 60 == 3 && !self.notificationFlyout.isVisible {
+                    self.notificationFlyout.refreshCount()
+                }
                 if self.showsMonitor && self.tick % 2 == 0 { self.monitorView.refresh() }
                 if self.showsMedia && self.tick % 3 == 0 { self.nowPlayingView.refresh() }
             }
@@ -1383,13 +1400,44 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     // MARK: - Calendar flyout & volume popover
 
     /// Kalender-Flyout (wie im Win11-Profil, gezeichnet im Aero-Stil), rechtsbündig über der Uhr.
+    /// Windows 7 battery flyout above the battery icon (Win11 profile: Battery settings).
+    private func toggleBatteryFlyout() {
+        guard !Theme.isWin11, let screen = window.screen else { TF.openSettings("com.apple.Battery-Settings.extension"); return }
+        let anchor = window.convertToScreen(battery.convert(battery.bounds, to: nil))
+        batteryFlyout.toggle(anchor: anchor, on: screen)
+    }
+
+    /// Windows 7 notification flyout above the flag (Win11 profile: macOS Notification Center).
+    private func toggleNotificationFlyout() {
+        guard !Theme.isWin11, let screen = window.screen else { SystemInfo.openNotificationCenter(); return }
+        let anchor = window.convertToScreen(flag.convert(flag.bounds, to: nil))
+        notificationFlyout.toggle(anchor: anchor, on: screen)
+    }
+
+    /// Windows 7 network flyout above the Wi-Fi tray icon.
+    private func toggleWifiFlyout() {
+        guard let screen = window.screen else { return }
+        let anchor = window.convertToScreen(wifiView.convert(wifiView.bounds, to: nil))
+        wifiFlyout.toggle(anchor: anchor, on: screen)
+    }
+
     private func showCalendar() {
         guard let anchor = Win11TrayDraw.screenRect(of: clock, clock.bounds),
               let screen = Win11TrayDraw.screen(of: clock) else { return }
-        Win11Flyouts.showCalendar(anchor: anchor, screen: screen)
+        if Theme.isWin11 {
+            Win11Flyouts.showCalendar(anchor: anchor, screen: screen)
+        } else {
+            clockFlyout.toggle(anchor: anchor, on: screen)   // Windows 7 clock flyout (AeroThemePlasma 1:1)
+        }
     }
 
     private func showVolume() {
+        if !Theme.isWin11, let screen = window.screen {
+            // Windows 7 volume flyout (AeroThemePlasma 1:1).
+            let anchor = window.convertToScreen(volume.convert(volume.bounds, to: nil))
+            volumeFlyout.toggle(anchor: anchor, on: screen)
+            return
+        }
         if volumePopover.isShown { volumePopover.close(); return }
         let vc = VolumePopoverVC()
         volumePopover.contentViewController = vc
@@ -1626,6 +1674,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
 
 private final class ClockView: NSView {
     var onClick: (() -> Void)?
+    /// Stays highlighted while the clock flyout is open (like the original).
+    var isActive: (() -> Bool)?
     private var hovering = false
     private let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -1664,7 +1714,7 @@ private final class ClockView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering { ClassicTray.fillHover(bounds.insetBy(dx: 2, dy: 6)) }
+        if hovering || isActive?() == true { ClassicTray.trayHighlight(bounds, glow: 6.5) }
         let style = NSMutableParagraphStyle()
         style.alignment = .center
         let timeAttrs: [NSAttributedString.Key: Any] = [
@@ -1737,6 +1787,19 @@ private final class ShowDesktopButton: NSView {
 
 private final class BatteryView: NSView {
     private var info: SystemInfo.Battery?
+    private var hovering = false
+    var onClick: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addTrackingArea(NSTrackingArea(rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick?() }
 
     func refresh() {
         info = SystemInfo.battery()
@@ -1745,6 +1808,7 @@ private final class BatteryView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if hovering { ClassicTray.trayHighlight(bounds) }
         guard let info else { return }
         // Original Windows 7 battery icon for the nearest 10 % level, charging variant when on power.
         let bucket = Int((Double(info.percent) / 10).rounded()) * 10

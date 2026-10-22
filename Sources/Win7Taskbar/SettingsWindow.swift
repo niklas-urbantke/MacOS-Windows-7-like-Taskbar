@@ -83,7 +83,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     private let glowClosedBox = NSButton(checkboxWithTitle: "Auch für geschlossene Anwendungen farbiger Glow", target: nil, action: nil)
 
     // Kalender-Termine (EventKit): Schalter, Hinweis und Kalenderauswahl.
-    private let eventsBox = NSButton(checkboxWithTitle: "Termine im Kalender der Uhr anzeigen", target: nil, action: nil)
+    private let eventsBox = NSButton(checkboxWithTitle: "Termine anzeigen (Mitteilungen an der Flagge, Kalender im Windows-11-Profil)", target: nil, action: nil)
     private let eventsStatus = NSTextField(wrappingLabelWithString: "")
     private let calendarList = NSStackView()
 

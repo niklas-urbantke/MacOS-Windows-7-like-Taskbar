@@ -88,7 +88,13 @@ enum Menu7Font {
         return families.first { installed.contains($0) }
     }()
 
-    static func font(size: CGFloat, italic: Bool = false) -> NSFont {
+    static func font(size: CGFloat, italic: Bool = false, bold: Bool = false) -> NSFont {
+        if bold {
+            if let fam = family, let f = NSFontManager.shared.font(withFamily: fam, traits: .boldFontMask, weight: 9, size: size) {
+                return f
+            }
+            return NSFont.boldSystemFont(ofSize: size)
+        }
         if let fam = family {
             if let f = NSFontManager.shared.font(withFamily: fam, traits: italic ? .italicFontMask : [], weight: 5, size: size),
                !italic || f.fontDescriptor.symbolicTraits.contains(.italic) {
