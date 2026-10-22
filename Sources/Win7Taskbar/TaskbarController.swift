@@ -47,6 +47,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let clockFlyout = ClockFlyoutController()
     private let notificationFlyout = NotificationFlyoutController()
     private let batteryFlyout = BatteryFlyoutController()
+    private let volumeFlyout = VolumeFlyoutController()
     private let monitorView = HardwareMonitorView(frame: .zero)
     private let startMenuClassic = StartMenuController()
     private let startMenu7 = StartMenu7Controller()
@@ -264,6 +265,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         wifiFlyout.onStateChange = { [weak self] in self?.wifiView.refresh() }
         flag.onClick = { [weak self] in self?.toggleNotificationFlyout() }
         battery.onClick = { [weak self] in self?.toggleBatteryFlyout() }
+        volumeFlyout.onStateChange = { [weak self] in self?.volume.refresh() }
         notificationFlyout.onOpenSystemCenter = { SystemInfo.openNotificationCenter() }
         notificationFlyout.onCountChange = { [weak self] n in self?.flag.active = n > 0 }
         for v: NSView in [win11Clock, win11Performance, win11Media] {
@@ -1430,6 +1432,12 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     }
 
     private func showVolume() {
+        if !Theme.isWin11, let screen = window.screen {
+            // Windows 7 volume flyout (AeroThemePlasma 1:1).
+            let anchor = window.convertToScreen(volume.convert(volume.bounds, to: nil))
+            volumeFlyout.toggle(anchor: anchor, on: screen)
+            return
+        }
         if volumePopover.isShown { volumePopover.close(); return }
         let vc = VolumePopoverVC()
         volumePopover.contentViewController = vc
