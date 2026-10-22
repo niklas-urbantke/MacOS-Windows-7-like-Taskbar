@@ -80,7 +80,11 @@ final class WifiView: NSView {
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// Opens the network flyout; without one (or without Wi-Fi hardware) the System Settings.
+    var onClick: (() -> Void)?
+
     override func mouseDown(with event: NSEvent) {
+        if let onClick, WifiManager.shared.hasWifi { onClick(); return }
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
     }
 

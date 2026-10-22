@@ -43,6 +43,7 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     private let showDesktop = ShowDesktopButton()
     private let nowPlayingView = NowPlayingView(frame: .zero)
     private let wifiView = WifiView(frame: .zero)
+    private let wifiFlyout = WifiFlyoutController()
     private let monitorView = HardwareMonitorView(frame: .zero)
     private let startMenuClassic = StartMenuController()
     private let startMenu7 = StartMenu7Controller()
@@ -255,6 +256,8 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
         for v in [showDesktop, clock, volume] { v.autoresizingMask = [.minXMargin]; glass.addSubview(v) }
         if hasBattery { battery.autoresizingMask = [.minXMargin]; glass.addSubview(battery) }
         for v in [nowPlayingView, wifiView, monitorView, flag] { v.autoresizingMask = [.minXMargin] }
+        wifiView.onClick = { [weak self] in self?.toggleWifiFlyout() }
+        wifiFlyout.onStateChange = { [weak self] in self?.wifiView.refresh() }
         for v: NSView in [win11Clock, win11Performance, win11Media] {
             v.autoresizingMask = [.minXMargin]
         }
@@ -1383,6 +1386,13 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     // MARK: - Calendar flyout & volume popover
 
     /// Kalender-Flyout (wie im Win11-Profil, gezeichnet im Aero-Stil), rechtsbündig über der Uhr.
+    /// Windows 7 network flyout above the Wi-Fi tray icon.
+    private func toggleWifiFlyout() {
+        guard let screen = window.screen else { return }
+        let anchor = window.convertToScreen(wifiView.convert(wifiView.bounds, to: nil))
+        wifiFlyout.toggle(anchor: anchor, on: screen)
+    }
+
     private func showCalendar() {
         guard let anchor = Win11TrayDraw.screenRect(of: clock, clock.bounds),
               let screen = Win11TrayDraw.screen(of: clock) else { return }

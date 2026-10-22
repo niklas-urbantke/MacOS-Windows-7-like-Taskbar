@@ -71,6 +71,10 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key> <true/>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Zeigt deine Termine im Kalender der Taskleiste an (nur lesend).</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>macOS zeigt WLAN-Namen nur mit Ortungsfreigabe an – nötig für die Netzwerkliste im Infobereich. Der Standort selbst wird nicht verwendet.</string>
+    <key>NSLocationUsageDescription</key>
+    <string>macOS zeigt WLAN-Namen nur mit Ortungsfreigabe an – nötig für die Netzwerkliste im Infobereich. Der Standort selbst wird nicht verwendet.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Steuert Musik-Player, Finder, Energie-Aktionen und die DockDoor-Fenstervorschau.</string>
     <key>GitCommit</key>               <string>$GIT_COMMIT</string>

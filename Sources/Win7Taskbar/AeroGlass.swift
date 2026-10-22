@@ -173,9 +173,11 @@ enum AeroGlass {
     /// (0,6)); the glass must stay inside it so it doesn't show as a second corner.
     static let cornerRadius: CGFloat = 6
 
-    /// Outline of a glass body: rounded top corners, square bottom (radius 0 = plain rectangle).
-    static func bodyPath(_ r: NSRect, radius: CGFloat, topIsMinY: Bool) -> CGPath {
+    /// Outline of a glass body: rounded top corners, square bottom (radius 0 = plain rectangle;
+    /// `roundBottom` rounds all four corners, e.g. a tray flyout).
+    static func bodyPath(_ r: NSRect, radius: CGFloat, topIsMinY: Bool, roundBottom: Bool = false) -> CGPath {
         guard radius > 0 else { return CGPath(rect: r, transform: nil) }
+        if roundBottom { return CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil) }
         let p = CGMutablePath()
         let top = topIsMinY ? r.minY : r.maxY, bottom = topIsMinY ? r.maxY : r.minY
         let inward: CGFloat = topIsMinY ? 1 : -1
@@ -200,6 +202,8 @@ final class AeroBackdropView: NSView {
     private let shape = CAShapeLayer()
     /// Radius of the rounded top corners (0 = rectangle, e.g. the taskbar).
     var topRadius: CGFloat = AeroGlass.cornerRadius { didSet { needsLayout = true } }
+    /// Round the bottom corners too (floating flyouts; the Start menu sits on the taskbar).
+    var roundBottom = false { didSet { needsLayout = true } }
     var usesFallback: Bool { backdrop == nil }
 
     init() {
@@ -258,7 +262,8 @@ final class AeroBackdropView: NSView {
         backdrop?.frame = bounds
         shape.frame = bounds
         let inset: CGFloat = topRadius > 0 ? 0.5 : 0
-        shape.path = AeroGlass.bodyPath(bounds.insetBy(dx: inset, dy: inset), radius: topRadius, topIsMinY: isFlipped)
+        shape.path = AeroGlass.bodyPath(bounds.insetBy(dx: inset, dy: inset), radius: topRadius, topIsMinY: isFlipped,
+                                        roundBottom: roundBottom)
         CATransaction.commit()
         if let v = fallback {
             v.frame = bounds
