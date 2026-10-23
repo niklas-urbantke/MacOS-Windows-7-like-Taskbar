@@ -145,13 +145,42 @@ Die Farbe gilt für das Original-Startmenü und die Taskleiste im Windows-7-Prof
 
 ### Infobereich (System-Tray)
 - **Original-Windows-7-Symbole** (aus AeroThemePlasma) für Netzwerk mit Signalstärke,
-  Lautstärke und Akku.
-- **Benachrichtigungs-Flagge** — öffnet die macOS-Mitteilungszentrale.
+  Lautstärke, Akku und die **Benachrichtigungs-Flagge**; Hover wie im Original
+  (`tabbar.svgz`).
 - **Now-Playing** (Spotify/Apple Music mit Fortschritt und Steuerung) und
   **Hardware-Monitor** (CPU/RAM-Balken).
-- **Uhr** (optional mit Sekunden) → Kalender mit Terminen aus dem macOS-Kalender.
 - Symbolgröße und Abstände global oder **je Symbol** einstellbar, **Reihenfolge** per Liste,
   jedes Element einzeln abschaltbar.
+
+#### Flyouts wie unter Windows 7
+Ein Klick auf ein Tray-Symbol öffnet das passende Flyout — 1:1 nach AeroThemePlasma, im
+Glasrahmen in der gewählten [Fensterfarbe](#fensterfarbe), mit Link in der Fußleiste und
+**Pinnadel** (angepinnt bleibt das Flyout offen):
+- **WLAN** — verbundenes Netz und verfügbare Verbindungen mit Original-Signalbalken,
+  Verbinden/Trennen, Kennworteingabe, WLAN ein/aus, Suche beim Tippen,
+  „Netzwerk- und Freigabecenter öffnen“. Die Netzwerknamen zeigt macOS nur mit
+  **Ortungsfreigabe** (wird einmal abgefragt).
+- **Uhr/Kalender** — Datum, Monatsblatt mit Monats-, Jahres- und Jahrzehntansicht,
+  Analoguhr mit Sekundenzeiger, „Datum- und Uhrzeiteinstellungen ändern...“.
+- **Akku** — Ladestand und Restzeit, Energiesparplan (zeigt den macOS-Stromsparmodus),
+  „Ruhezustand und Bildschirmsperre manuell verhindern“, „Weitere Energieoptionen“.
+- **Mitteilungen** (Flagge) — Kalendertermine von heute und morgen, ungelesene Mails aus
+  Apple Mail und die Zahl ungelesener Nachrichten von Slack, Teams & Co. (aus dem
+  Dock-Badge), nach App gruppiert; die Flagge zeigt ein Badge, solange Einträge da sind.
+- **Lautstärke** — Lautsprecher und Mikrofon mit Gerätewahl, senkrechtem Windows-7-Regler
+  und Stumm-Button; „Mixer“ öffnet die macOS-Toneinstellungen.
+
+<p align="center">
+  <img src="docs/flyout-wifi.png" alt="WLAN-Flyout" width="250">
+  <img src="docs/flyout-notifications.png" alt="Mitteilungs-Flyout" width="270">
+  <img src="docs/flyout-volume.png" alt="Lautstärke-Flyout" width="140">
+</p>
+<p align="center">
+  <img src="docs/flyout-clock.png" alt="Uhr/Kalender-Flyout" width="320">
+  <img src="docs/flyout-battery.png" alt="Akku-Flyout" width="230">
+</p>
+
+Im Windows-11-Profil gelten weiter dessen eigene Flyouts.
 
 ### Windows-11-Profil
 - **Flache Leiste** mit Windows-11-Logo in der macOS-Akzentfarbe, Icons **zentriert** oder
@@ -234,8 +263,9 @@ drei Zustände vertikal gestapelt (normal / Hover / geöffnet).
 |---|---|
 | **Bildschirmaufnahme** | Vorschaubilder der Fenster (Aero Peek) |
 | **Bedienungshilfen** | Platz-Reservierung, minimierte Fenster, Fenster schließen/wiederherstellen, Badges, Mitteilungszentrale, Hotkeys |
-| **Automatisierung** (Finder/System Events/Spotify/Music) | Energie-Aktionen, Finder-Fenster, Now-Playing |
-| **Kalender** (optional) | Termine im Kalender der Uhr |
+| **Automatisierung** (Finder/System Events/Spotify/Music/Mail) | Energie-Aktionen, Finder-Fenster, Now-Playing, ungelesene Mails |
+| **Kalender** (optional) | Termine im Mitteilungs-Flyout (bzw. Kalender im Windows-11-Profil) |
+| **Ortungsdienste** | Namen der WLAN-Netze im WLAN-Flyout (der Standort selbst wird nicht verwendet) |
 
 Alle unter *Systemeinstellungen → Datenschutz & Sicherheit* aktivieren.
 
@@ -260,6 +290,12 @@ Sources/Win7Taskbar/
   TaskbarButton.swift / TaskbarItem    Taskbar-Button (Zustände, Gruppierung, Hover-Glow) + Modell
   StartMenu7.swift                     Startmenü „Original (Windows 7)“ (SevenStart-Nachbau)
   AeroGlass.swift / AeroColorPicker    Aero-Glas (Blur + DWM-Farbmatrix), Fensterfarbe + Farbauswahl
+  TrayFlyout.swift                     Gemeinsames Gerüst der Tray-Flyouts (Rahmen, Fußleiste, Pin, Win7-Controls)
+  WifiFlyout / WifiManager             WLAN-Flyout + CoreWLAN (Suche, Verbinden, Ortungsfreigabe)
+  ClockFlyout / BatteryFlyout / BatteryStatus   Uhr/Kalender- und Akku-Flyout
+  NotificationFlyout / NotificationSources      Mitteilungs-Flyout (Termine, Mail, Dock-Badges)
+  VolumeFlyout / AudioOutput           Lautstärke-Flyout + CoreAudio
+  DemoMode.swift                       Demo-Modus für anonymisierte Screenshots
   StartMenu.swift                      Startmenü „bisherige Variante“
   StartMenu11.swift / StartMenuShared  Windows-11-Startmenü + gemeinsame Menü-Logik
   StartMenuActions.swift               Aktionen der rechten Spalte (gemeinsam für alle Menüs)
@@ -292,6 +328,10 @@ ThemeResources/                        Grafiken (u. a. sm-* = Startmenü-Rahmen 
   Now-Playing-Infos sind für Fremd-Apps gesperrt, daher die direkte Spotify/Music-Abfrage.
 - Das Aero-Glas (Original-Startmenü, Windows-7-Taskleiste) nutzt eine nicht öffentliche macOS-Schnittstelle; fehlt
   sie, wird automatisch auf das Standard-Material zurückgefallen.
+- Mitteilungen anderer Apps gibt macOS nicht heraus: Details nur aus Apple Mail, bei Slack,
+  Teams & Co. nur die Anzahl aus dem Dock-Badge. Eine Lautstärke pro App gibt es nicht.
+- Beim Verbinden mit einem gespeicherten WLAN fragt macOS einmal pro Netz nach dem
+  Admin-Passwort (mit „Immer erlauben“ nicht wieder).
 - macOS rendert Schrift ohne Hinting/ClearType — Segoe UI wirkt daher etwas weicher als unter Windows.
 
 ---
