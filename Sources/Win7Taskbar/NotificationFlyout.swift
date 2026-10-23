@@ -236,7 +236,14 @@ final class NotificationFlyoutController: NSObject {
     private let scroll = NSScrollView()
     private let listDoc = M7FlippedView()
     private var items: [NotificationSources.Item] = []
-    private var dismissed: Set<String> = []
+    /// Entries closed with ×, shared by the bars on all screens (closing one closes it everywhere).
+    private static var dismissed: Set<String> = []
+    private static let dismissedChanged = Notification.Name("NotificationFlyoutDismissedChanged")
+
+    private static func dismiss(_ keys: [String]) {
+        dismissed.formUnion(keys)
+        NotificationCenter.default.post(name: dismissedChanged, object: nil)
+    }
     private var expandedApps: Set<String> = []
     private var refreshTimer: Timer?
     private var anchor = NSRect.zero
@@ -264,6 +271,14 @@ final class NotificationFlyoutController: NSObject {
             self?.onOpenSystemCenter?()
         }
         host.onHide = { [weak self] in self?.refreshTimer?.invalidate(); self?.refreshTimer = nil }
+        NotificationCenter.default.addObserver(self, selector: #selector(dismissedElsewhere),
+                                               name: Self.dismissedChanged, object: nil)
+    }
+
+    /// Another bar (or this one) closed entries: update the flag badge and an open list.
+    @objc private func dismissedElsewhere() {
+        updateCount()
+        if host.isVisible { build() }
     }
 
     private static func key(_ i: NotificationSources.Item) -> String { "\(i.app)|\(i.title)|\(i.body ?? "")" }
@@ -291,7 +306,7 @@ final class NotificationFlyoutController: NSObject {
     }
 
     private func updateCount() {
-        count = items.filter { !dismissed.contains(Self.key($0)) }.count
+        count = items.filter { !Self.dismissed.contains(Self.key($0)) }.count
         onCountChange?(count)
     }
 
@@ -307,7 +322,7 @@ final class NotificationFlyoutController: NSObject {
     }
 
     private func build() {
-        let visible = items.filter { !dismissed.contains(Self.key($0)) }
+        let visible = items.filter { !Self.dismissed.contains(Self.key($0)) }
         // Group by app, keeping the first appearance order.
         var order: [String] = []
         var groups: [String: [NotificationSources.Item]] = [:]
@@ -351,9 +366,8 @@ final class NotificationFlyoutController: NSObject {
                 let head = NFBlock(app: app, icon: icon, item: nil, showHeader: true, child: false)
                 head.k = k
                 head.onClose = { [weak self] in
-                    guard let self else { return }
-                    entries.forEach { self.dismissed.insert(Self.key($0)) }
-                    self.updateCount(); self.build()
+                    guard self != nil else { return }
+                    Self.dismiss(entries.map(Self.key))
                 }
                 add(head, head.height(for: cw))
                 let expanded = expandedApps.contains(app)
@@ -391,9 +405,8 @@ final class NotificationFlyoutController: NSObject {
     private func wire(_ b: NFBlock, _ e: NotificationSources.Item) {
         b.onOpen = { [weak self] in self?.host.hide(); e.open() }
         b.onClose = { [weak self] in
-            guard let self else { return }
-            self.dismissed.insert(Self.key(e))
-            self.updateCount(); self.build()
+            guard self != nil else { return }
+            Self.dismiss([Self.key(e)])
         }
     }
 }
