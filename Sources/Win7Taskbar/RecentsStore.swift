@@ -38,7 +38,7 @@ enum RecentsStore {
             entries.append(AppEntry(name: app.localizedName ?? url.deletingPathExtension().lastPathComponent,
                                     url: url, bundleID: id))
         }
-        return Array(entries.prefix(maxCount))
+        return Array(entries.filter { !DemoMode.hides($0.bundleID) }.prefix(maxCount))
     }
 
     private static func loadRaw() -> [Rec] {
@@ -73,7 +73,7 @@ enum StartPins {
 
     /// Pinned apps resolved to AppEntry (skips apps no longer installed).
     static func entries() -> [AppEntry] {
-        load().compactMap { id in
+        load().filter { !DemoMode.hides($0) }.compactMap { id in
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return nil }
             return AppEntry(name: url.deletingPathExtension().lastPathComponent, url: url, bundleID: id)
         }

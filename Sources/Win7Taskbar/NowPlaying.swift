@@ -26,6 +26,7 @@ enum NowPlaying {
 
     /// Latest state; cheap when the helper runs (no process spawn per call).
     static func current() -> Info? {
+        if DemoMode.on { return DemoMode.track }
         if let info = MediaRemoteHelper.shared.currentInfo() { return info }
         return scriptCurrent()
     }
@@ -71,6 +72,7 @@ enum NowPlaying {
     /// `completion` runs on the main queue (nil if the player offers no cover).
     static func artwork(for info: Info, completion: @escaping (NSImage?) -> Void) {
         let key = info.trackKey
+        if DemoMode.on { completion(nil); return }   // no real cover on screenshots
         if let img = artworkCache[key] { completion(img); return }
         artworkQueue.async {
             // Helper data first (covers every player); the cover may arrive a moment

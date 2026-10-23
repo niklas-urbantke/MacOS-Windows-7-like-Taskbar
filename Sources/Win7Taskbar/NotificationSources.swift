@@ -21,6 +21,7 @@ enum NotificationSources {
 
     /// Collects everything in the background; `done` runs on the main queue, newest first per app.
     static func gather(_ done: @escaping ([Item]) -> Void) {
+        if DemoMode.on { done(DemoMode.notifications); return }
         let badges = DockBadges.current()
         let mailRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.mail").isEmpty
         queue.async {

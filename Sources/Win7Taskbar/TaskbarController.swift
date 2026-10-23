@@ -390,9 +390,9 @@ final class TaskbarController: NSObject, TaskbarButtonDelegate {
     // MARK: - Items
 
     private func rebuildItems() {
-        let pinnedKeys = PinStore.load()
+        let pinnedKeys = PinStore.load().filter { !DemoMode.hides($0) }
         let running = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
+            .filter { $0.activationPolicy == .regular && !DemoMode.hides($0.bundleIdentifier) }
 
         var newItems: [TaskbarItem] = []
         var usedRunning = Set<pid_t>()

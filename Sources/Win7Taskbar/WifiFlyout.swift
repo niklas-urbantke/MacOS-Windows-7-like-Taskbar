@@ -284,7 +284,7 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
         host.setMainSize(width: 272, height: 304)
         search.stringValue = ""
         expanded = nil; passwordFor = nil; failed = []
-        networks = currentOnly()
+        networks = DemoMode.on ? DemoMode.wifiNetworks : currentOnly()
         layoutChrome()
         reloadList()
 
@@ -319,6 +319,7 @@ final class WifiFlyoutController: NSObject, NSTextFieldDelegate {
     }
 
     private func scanNow() {
+        if DemoMode.on { networks = DemoMode.wifiNetworks; reloadList(); return }
         guard wifi.powerOn, !wifi.scanning else { if passwordFor == nil { reloadList() }; return }
         wifi.scan { [weak self] list in
             guard let self, self.host.isVisible else { return }
